@@ -209,6 +209,10 @@ function localDateKey(date: Date): string {
 }
 
 type RecurrenceValueType = NonNullable<CalendarEvent['recurrenceValueType']>;
+type ParsedCalendarEvent = CalendarEvent & {
+  cancelled?: boolean;
+  recurrenceIdAllDay?: boolean;
+};
 const MAX_RECURRENCE_SCAN_DAYS = 100000;
 
 /**
@@ -372,11 +376,11 @@ export function parseAttendee(line: string): Attendee {
  */
 export function parseIcsContent(icsData: string, calendarName = 'Calendar'): CalendarEvent[] {
   const lines = unfoldIcsContent(icsData);
-  const events: CalendarEvent[] = [];
+  const events: ParsedCalendarEvent[] = [];
 
   let inEvent = false;
   let componentKind: 'VEVENT' | 'VTODO' = 'VEVENT';
-  let currentEvent: Partial<CalendarEvent> & { actionItems?: string[]; cancelled?: boolean } = {};
+  let currentEvent: Partial<ParsedCalendarEvent> & { actionItems?: string[] } = {};
   let eventCounter = 0;
 
   for (const line of lines) {
@@ -452,7 +456,10 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
           recurrenceValueType,
           recurrenceError,
           // Kept internal until overrides are folded into their master below.
-          ...(currentEvent.cancelled ? ({ cancelled: true } as any) : {}),
+          ...(currentEvent.cancelled ? { cancelled: true } : {}),
+          ...(currentEvent.recurrenceIdAllDay !== undefined
+            ? { recurrenceIdAllDay: currentEvent.recurrenceIdAllDay }
+            : {}),
           calendarName: currentEvent.calendarName,
           isTaskMirror: currentEvent.isTaskMirror,
         });
@@ -554,9 +561,12 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
         ];
         break;
       }
-      case 'RECURRENCE-ID':
-        currentEvent.recurrenceId = parseIcsDate(trimmed).date;
+      case 'RECURRENCE-ID': {
+        const recurrenceId = parseIcsDate(trimmed);
+        currentEvent.recurrenceId = recurrenceId.date;
+        currentEvent.recurrenceIdAllDay = recurrenceId.allDay;
         break;
+      }
       case 'STATUS':
         if (componentKind === 'VTODO') {
           currentEvent.completed = propVal.toUpperCase() === 'COMPLETED';
@@ -590,14 +600,24 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
     const master = masters.get(event.uid);
     const key = localDateKey(event.recurrenceId);
     if (master) {
-      master.recurrenceExceptionInstants = [
-        ...new Set([...(master.recurrenceExceptionInstants || []), event.recurrenceId.toISOString()]),
-      ];
+      if (Boolean(event.recurrenceIdAllDay) !== master.allDay) {
+        master.recurrenceError = master.recurrenceError ??
+          'RECURRENCE-ID value type does not match DTSTART';
+        continue;
+      }
+      if (event.recurrenceIdAllDay) {
+        master.exceptionDates = [...new Set([...(master.exceptionDates || []), key])];
+      } else {
+        master.recurrenceExceptionInstants = [
+          ...new Set([...(master.recurrenceExceptionInstants || []), event.recurrenceId.toISOString()]),
+        ];
+      }
     }
-    if (!(event as any).cancelled) {
-      const replacement = { ...event, recurrenceId: undefined };
+    if (!event.cancelled) {
+      const { recurrenceIdAllDay: _recurrenceIdAllDay, cancelled: _cancelled, ...replacement } = event;
       output.push({
         ...replacement,
+        recurrenceId: undefined,
         uid: `${event.uid}_${key}`,
         rrule: undefined,
         recurringSeriesId: event.uid,

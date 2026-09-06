@@ -86,9 +86,8 @@ function dateValue(date: Date): string {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
 }
 
-function utcDateTimeValue(date: Date): string {
-  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
-    `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+function localDateTimeValue(date: Date): string {
+  return `${dateValue(date)}T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
 /** Builds the bounded RRULE subset exposed by the SNFolio event form. */
@@ -124,7 +123,7 @@ export function rruleForRepeat(
       lines.push(`UNTIL=${dateValue(inclusive)}`);
     } else {
       inclusive.setHours(start.getHours(), start.getMinutes(), start.getSeconds(), 0);
-      lines.push(`UNTIL=${utcDateTimeValue(inclusive)}`);
+      lines.push(`UNTIL=${localDateTimeValue(inclusive)}`);
     }
   }
   return lines.join(';');

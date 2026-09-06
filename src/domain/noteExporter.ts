@@ -43,6 +43,19 @@ function formatIcsDate(d: Date): string {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
 }
 
+function legacyTimedException(key: string, event: CalendarEvent): Date | undefined {
+  const match = key.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return undefined;
+  const date = new Date(event.start);
+  date.setFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (
+    date.getFullYear() !== Number(match[1]) ||
+    date.getMonth() !== Number(match[2]) - 1 ||
+    date.getDate() !== Number(match[3])
+  ) return undefined;
+  return date;
+}
+
 /**
  * Escapes an RFC 5545 TEXT value. Backslash must be escaped first so the
  * escapes introduced below are not themselves re-escaped.
@@ -107,9 +120,16 @@ export function generateOutboundIcsEvent(event: CalendarEvent): string {
   if (event.allDay && event.exceptionDates?.length) {
     exceptionLines.push(`EXDATE;VALUE=DATE:${event.exceptionDates.map(d => d.replace(/-/g, '')).join(',')}`);
   } else if (!event.allDay) {
-    const exceptionInstants = (event.recurrenceExceptionInstants || [])
-      .map(value => new Date(value))
-      .filter(date => !Number.isNaN(date.getTime()))
+    // Older saved events used device-local date keys. They can be upgraded
+    // without guessing only when the recurrence is floating or has no domain metadata.
+    const legacyExceptions = !event.recurrenceValueType || event.recurrenceValueType === 'floating'
+      ? (event.exceptionDates || []).map(key => legacyTimedException(key, event))
+      : [];
+    const exceptionInstants = [
+      ...legacyExceptions,
+      ...(event.recurrenceExceptionInstants || []).map(value => new Date(value)),
+    ]
+      .filter((date): date is Date => date instanceof Date && !Number.isNaN(date.getTime()))
       .map(date => formatTimedProperty('EXDATE', date, event));
     if (exceptionInstants.length) {
       const unique = [...new Set(exceptionInstants)];
