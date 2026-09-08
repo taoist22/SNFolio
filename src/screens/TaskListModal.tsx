@@ -31,6 +31,7 @@ interface TaskListModalProps {
   onToggle: (task: CalendarTask) => void;
   onEdit: (task: CalendarTask) => void;
   notePathFor: (uid: string) => string | undefined;
+  onLinkNote?: (task: CalendarTask) => void;
   onNoteAction: (task: CalendarTask, existingPath?: string) => void;
 }
 
@@ -55,6 +56,7 @@ export function TaskListModal({
   onEdit,
   notePathFor,
   onNoteAction,
+  onLinkNote,
 }: TaskListModalProps): React.JSX.Element {
   const [scope, setScope] = useState<TaskScope>('open');
   const [grouping, setGrouping] = useState<TaskGrouping>('due');
@@ -294,6 +296,11 @@ export function TaskListModal({
                         </Text>
                       </TouchableOpacity>
 
+                      {!notePath && onLinkNote && (
+                        <TouchableOpacity style={styles.noteButton} onPress={() => onLinkNote(task)}>
+                          <Text allowFontScaling={false} style={styles.noteButtonText}>Link Note</Text>
+                        </TouchableOpacity>
+                      )}
                       <TouchableOpacity
                         style={styles.noteButton}
                         onPress={() => onNoteAction(task, notePath)}

@@ -27,6 +27,7 @@ interface CreateEventNoteModalProps {
   meeting?: EventNoteChoice;
   classNote?: EventNoteChoice;
   taskNote?: EventNoteChoice;
+  onLinkExisting?: () => Promise<void>;
   onCancel: () => void;
   onCreate: (kind: LinkedNoteKind, folder: string, name: string) => void | Promise<void>;
 }
@@ -45,6 +46,7 @@ export function CreateEventNoteModal({
   taskNote,
   onCancel,
   onCreate,
+  onLinkExisting,
 }: CreateEventNoteModalProps): React.JSX.Element {
   const [kind, setKind] = React.useState<LinkedNoteKind>(initialKind);
   const [name, setName] = React.useState(initialName);
@@ -85,6 +87,19 @@ export function CreateEventNoteModal({
           <View style={styles.card}>
             <Text allowFontScaling={false} style={styles.title}>Create {itemMode === 'task' ? 'Task' : 'Event'} Note</Text>
             <Text allowFontScaling={false} style={styles.eventTitle} numberOfLines={2}>“{eventTitle}”</Text>
+
+            {itemMode === 'task' && onLinkExisting && (
+              <TouchableOpacity
+                disabled={busy}
+                style={styles.location}
+                onPress={async () => {
+                  setBusy(true);
+                  try { await onLinkExisting(); } finally { setBusy(false); }
+                }}
+              >
+                <Text allowFontScaling={false} style={styles.locationLabel}>Link Existing Note</Text>
+              </TouchableOpacity>
+            )}
 
             <Text allowFontScaling={false} style={styles.label}>Note name</Text>
             <HandwritingTextInput

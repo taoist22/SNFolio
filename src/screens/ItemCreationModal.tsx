@@ -104,6 +104,7 @@ interface ItemCreationModalProps {
   editingTask?: CalendarTask | null;
   /** Linked handwritten note for this task, if one exists. */
   taskNotePath?: string;
+  onLinkTaskNote?: (task: CalendarTask) => void;
   onTaskNoteAction?: (task: CalendarTask, existingPath?: string) => void;
   /** Only offered while editing an existing item, never while creating one. */
   onDeleteTask?: (uid: string) => void;
@@ -139,6 +140,7 @@ export function ItemCreationModal({
   editingTask,
   taskNotePath,
   onTaskNoteAction,
+  onLinkTaskNote,
   areas = [],
   taskAreaId,
   onCreateArea,
@@ -1087,25 +1089,31 @@ export function ItemCreationModal({
 
           </ScrollView>
 
-          {/* One row: stacked, Delete fell past the sheet's 85% max height and
-              was clipped off screen entirely. */}
+          {editingTask && (onTaskNoteAction || onLinkTaskNote) && (
+            <View style={styles.noteActionRow}>
+              {!taskNotePath && onLinkTaskNote && (
+                <TouchableOpacity style={styles.taskNoteBtn} onPress={() => onLinkTaskNote(editingTask)}>
+                  <Text allowFontScaling={false} style={styles.taskNoteBtnText}>Link Note…</Text>
+                </TouchableOpacity>
+              )}
+              {onTaskNoteAction && (
+                <TouchableOpacity style={styles.taskNoteBtn} onPress={() => onTaskNoteAction(editingTask, taskNotePath)}>
+                  <Text allowFontScaling={false} style={styles.taskNoteBtnText}>
+                    {taskNotePath ? 'Open Note' : 'Create Note'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
           <View style={styles.footerRow}>
-            <TouchableOpacity style={[styles.saveBtn, styles.footerGrow]} onPress={handleSave}>
+            <TouchableOpacity
+              style={[styles.saveBtn, itemKind === 'task' ? styles.compactTaskSave : styles.footerGrow]}
+              onPress={handleSave}
+            >
               <Text allowFontScaling={false} style={styles.saveBtnText}>
                 💾 Save {itemKind === 'event' ? 'Event' : 'Task'}
               </Text>
             </TouchableOpacity>
-
-            {editingTask && onTaskNoteAction && (
-              <TouchableOpacity
-                style={styles.taskNoteBtn}
-                onPress={() => onTaskNoteAction(editingTask, taskNotePath)}
-              >
-                <Text allowFontScaling={false} style={styles.taskNoteBtnText}>
-                  {taskNotePath ? '📂 Open Note' : '📝 Create Note'}
-                </Text>
-              </TouchableOpacity>
-            )}
 
             {/* Editing only: there is nothing to delete from a create form. */}
             {editingTask && onDeleteTask && (
@@ -1400,13 +1408,15 @@ const styles = StyleSheet.create({
   footerGrow: {
     flex: 1,
   },
+  noteActionRow: { flexDirection: 'row', marginBottom: 8 },
+  compactTaskSave: { paddingHorizontal: 20, paddingVertical: 8, justifyContent: 'center' },
   taskNoteBtn: {
     borderWidth: 2,
     borderColor: '#000000',
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    marginLeft: 7,
+    marginRight: 7,
     justifyContent: 'center',
   },
   taskNoteBtnText: { fontSize: 12, fontWeight: 'bold', color: '#000000' },
@@ -1421,7 +1431,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
   deleteTaskBtnText: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#000000',
   },

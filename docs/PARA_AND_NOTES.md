@@ -44,3 +44,5 @@ Linked notes work differently: tap an event or edit a task, then choose **Create
 Under **Connections & Settings → Notes**, **Default Event Note Location** chooses whether the confirmation initially selects the assigned Project/Area or the standard Meeting/Class folder. Advanced folder layout can configure a relative subpath such as `Meetings` or `Course Notes/Classes`; leaving it blank files directly in the Project or Area root. Project membership wins over Area membership. Events with neither use the Event Type or standard Meeting/Class folder, and an existing recurring notebook always stays at its recorded path.
 
 Before opening another note, SNFolio clears transient recognition and lasso state to prevent handwriting from being carried into the destination file.
+
+For an existing task, choose **Link Note** to browse for a Supernote `.note` file. Linking preserves the notebook contents. The task then offers **Open Note**. Task note actions appear above the compact Save Task and Delete controls, and All Tasks also offers Link Note for tasks without a linked notebook.

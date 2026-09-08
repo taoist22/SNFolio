@@ -11,7 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { PluginManager, FileUtils, PluginCommAPI, RattaFileSelector } from 'sn-plugin-lib';
+import { PluginManager, FileUtils, PluginCommAPI, PluginFileAPI, RattaFileSelector } from 'sn-plugin-lib';
 import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingTextInput';
 import {
   Area,
@@ -3287,6 +3287,56 @@ export function AgendaScreen(): React.JSX.Element {
     setTaskNoteCreationTarget(task);
   };
 
+  const handleLinkExistingTaskNote = async (selectedTask?: CalendarTask) => {
+    const task = selectedTask || taskNoteCreationTarget;
+    if (!task) return;
+    if (!RattaFileSelector?.selectFile) {
+      setStatusMsg('Native file picker unavailable on this device.');
+      return;
+    }
+    setTaskNoteCreationTarget(null);
+    setShowItemCreationModal(false);
+    setShowTaskList(false);
+    try {
+      const result = await RattaFileSelector.selectFile({
+        selectType: 0,
+        maxNum: 1,
+        title: 'Select a note to link to this task',
+        rightButtonText: 'Link Note',
+        needSelectFolder: '/storage/emulated/0/Note',
+        suffixList: ['note'],
+      });
+      const notePath = firstPickedFilePath(result);
+      if (!notePath) {
+        setTaskNoteCreationTarget(task);
+        return;
+      }
+      if (!/\.note$/i.test(notePath)) {
+        setStatusMsg('Choose a Supernote .note file.');
+        setTaskNoteCreationTarget(task);
+        return;
+      }
+      const note: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
+      if (!note?.success || typeof note.data !== 'number' || note.data < 1) {
+        setStatusMsg('Could not read the selected note.');
+        setTaskNoteCreationTarget(task);
+        return;
+      }
+      calendarStorage.setMapping({
+        eventUid: task.uid,
+        seriesId: task.uid,
+        notePath,
+        lastPageNum: note.data,
+        lastCreatedIso: new Date().toISOString(),
+      });
+      setMembershipRevision(value => value + 1);
+      setStatusMsg(`Linked ${notePath.split('/').pop()} to "${task.title}".`);
+    } catch (error: any) {
+      setStatusMsg(`Could not link note: ${error?.message || 'Picker closed'}`);
+      setTaskNoteCreationTarget(task);
+    }
+  };
+
   const handleConfirmTaskNote = async (kind: LinkedNoteKind, folder: string, name: string) => {
     const task = taskNoteCreationTarget;
     setTaskNoteCreationTarget(null);
@@ -4081,6 +4131,7 @@ export function AgendaScreen(): React.JSX.Element {
           setShowTaskList(false);
           handleEditTask(task);
         }}
+        onLinkNote={task => { void handleLinkExistingTaskNote(task); }}
         notePathFor={uid => calendarStorage.getMapping(uid)?.notePath}
         onNoteAction={(task, existingPath) => {
           setShowTaskList(false);
@@ -4122,6 +4173,7 @@ export function AgendaScreen(): React.JSX.Element {
           taskNote={taskNoteChoiceFor(taskNoteCreationTarget)}
           onCancel={() => setTaskNoteCreationTarget(null)}
           onCreate={handleConfirmTaskNote}
+          onLinkExisting={handleLinkExistingTaskNote}
         />
       )}
 
@@ -5422,6 +5474,7 @@ export function AgendaScreen(): React.JSX.Element {
             onCreateTask={handleCreateNewTask}
             editingTask={editingTask}
             taskNotePath={editingTask ? calendarStorage.getMapping(editingTask.uid)?.notePath : undefined}
+            onLinkTaskNote={task => { void handleLinkExistingTaskNote(task); }}
             onTaskNoteAction={(task, existingPath) => {
               if (existingPath) {
                 setShowItemCreationModal(false);
