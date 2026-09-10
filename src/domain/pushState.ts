@@ -118,6 +118,21 @@ export function recordPush(
   };
 }
 
+/** Applies resource metadata returned by a successful PUT and records it as pushed. */
+export function recordSuccessfulPush(
+  state: CaldavPushState,
+  item: CalendarEvent,
+  resource: { caldavUrl?: string; etag?: string },
+  at: number = Date.now()
+): { event: CalendarEvent; state: CaldavPushState } {
+  const event = {
+    ...item,
+    caldavUrl: resource.caldavUrl || item.caldavUrl,
+    etag: resource.etag || item.etag,
+  };
+  return { event, state: recordPush(state, event, at) };
+}
+
 /** Forgets a single item, so a later re-create pushes again. */
 export function forgetPush(state: CaldavPushState, uid: string): CaldavPushState {
   const records = { ...state.records };
