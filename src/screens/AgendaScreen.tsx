@@ -46,6 +46,7 @@ import {
 } from '../domain/noteTemplates';
 import { expandEventsForDate, parseIcsContent } from '../domain/icsParser';
 import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
+import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
 import { resolveArea, resolveAreaId } from '../domain/membership';
 import { calendarStorage } from '../storage/calendarStorage';
@@ -2585,8 +2586,8 @@ export function AgendaScreen(): React.JSX.Element {
 
   const handleDeleteItem = async (event: CalendarEvent) => {
     const identity = noteIdentity(event);
-    const editable = calendarStorage.getUserEvents().some(item => item.uid === identity) ||
-      calendarStorage.getCaldavEvents().some(item => item.uid === identity);
+    const editable = findStoredSeries(calendarStorage.getUserEvents(), identity) ||
+      findStoredSeries(calendarStorage.getCaldavEvents(), identity);
     if (!editable) {
       setStatusMsg('Subscribed iCalendar feeds are read-only and cannot be deleted here.');
       return;
@@ -2658,8 +2659,20 @@ export function AgendaScreen(): React.JSX.Element {
   const handleDeleteEntireSeries = async () => {
     if (!pendingDeleteEvent) return;
     const targetId = pendingDeleteEvent.recurringSeriesId || pendingDeleteEvent.uid;
+    const storedRemote = findStoredSeries(calendarStorage.getCaldavEvents(), targetId);
+    const storedLocal = findStoredSeries(calendarStorage.getUserEvents(), targetId);
+    const resource = storedRemote || storedLocal || pendingDeleteEvent;
+    const serverBacked = Boolean(storedRemote || resource.caldavUrl ||
+      knownServerUids(calendarStorage.getPushState(caldavUrl)).has(targetId));
 
-    if (caldavEnabled && caldavAppleId && caldavPassword) {
+    if (serverBacked && !(caldavEnabled && caldavAppleId && caldavPassword)) {
+      setStatusMsg('Connect your calendar account before deleting this synced series.');
+      setShowDeleteModal(false);
+      setPendingDeleteEvent(null);
+      return;
+    }
+
+    if (serverBacked) {
       const removed = await caldavService.deleteIcloudEvent(
         targetId,
         {
@@ -2670,7 +2683,7 @@ export function AgendaScreen(): React.JSX.Element {
           taskListUrl: caldavTaskListUrl,
         },
         isTaskItem(pendingDeleteEvent),
-        { url: pendingDeleteEvent.caldavUrl, etag: pendingDeleteEvent.etag }
+        { url: resource.caldavUrl, etag: resource.etag }
       );
       if (!removed.success) {
         setStatusMsg(`Could not delete the series from CalDAV: ${removed.message}`);
@@ -2681,11 +2694,11 @@ export function AgendaScreen(): React.JSX.Element {
     }
 
     setAllParsedEvents(prev =>
-      prev.filter(evt => evt.uid !== targetId && evt.recurringSeriesId !== targetId && !evt.uid.startsWith(targetId))
+      prev.filter(evt => !belongsToSeries(evt, targetId))
     );
     calendarStorage.removeUserEvent(targetId);
     calendarStorage.setCaldavEvents(
-      calendarStorage.getCaldavEvents().filter(evt => evt.uid !== targetId)
+      calendarStorage.getCaldavEvents().filter(evt => !belongsToSeries(evt, targetId))
     );
 
     setStatusMsg(`Deleted entire recurring series "${pendingDeleteEvent.summary}".`);

@@ -33,6 +33,16 @@ build number and mark each result Pass, Fail, or Not Tested.
 - CORE-01 through CORE-04: Pass on device.
 - Additional verified behavior: Google feed display, two-way Apple event creation/deletion, nested PARA folders and notes, event/task editing and deletion, persistence after restart, and no handwriting transfer between notes.
 
+### Build 45 (0.1.19) candidate checks
+
+- TypeScript: Pass.
+- Lint: Pass with 505 warnings, zero errors.
+- Full coverage suite: Pass, 516 tests across 37 suites.
+- Past-series regression: Pass locally for missing cached masters, saved resource selection, and removal of persisted exceptions after reload without removing similarly prefixed UIDs.
+- Reported stuck past-series deletion: Pass on device, confirmed by the maintainer after installing build 45. The broader checks below were not individually confirmed.
+- REC-01 through REC-13 and CORE-01 through CORE-04: Not Tested on device for this build.
+- Additional device check: delete an ended series with a moved occurrence, restart and sync, then verify every occurrence remains absent and its notebook remains intact. Not Tested.
+
 ## Core Regression After Recurrence Changes
 
 | ID | Test | Expected result |
