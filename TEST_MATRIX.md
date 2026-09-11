@@ -74,3 +74,9 @@ Use disposable events in the connected iCloud calendar. No imported synthetic IC
 5. **Restart and existing data:** Restart SNFolio. Confirm recurring edits/deletions persist, normal events remain correct, and an existing task's linked note still opens.
 
 Record Pass/Fail/Not Tested for each item and any exact error. These are device acceptance checks; automated tests provide the broader recurrence edge-case coverage.
+
+## Final 0.1.20 / build 48
+
+Maintainer confirmed all five build 47 device acceptance checks passed: occurrence/series deletion; bounded recurrence, editing and sync; New York DST display; all-day moved occurrence and series cleanup; restart persistence and linked note opening.
+
+Build 48 promotes the tested application code unchanged. Only version metadata changes from 0.1.20-rc.1/build 47 to 0.1.20/build 48.
