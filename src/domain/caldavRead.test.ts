@@ -125,7 +125,7 @@ END:VCALENDAR</calendar-data></response>`.replace(/&#13;\n/g, '\n');
           });
     });
 
-    test('reads a TZID time as device-local — the known limitation', async () => {
+    test('reads a TZID time as the instant it names, not as device-local', async () => {
       mockResponse(207, ICLOUD_CALENDAR_QUERY_RESPONSE);
       const { events } = await new CaldavService().fetchEventsInRange(
         COLLECTION,
@@ -134,11 +134,11 @@ END:VCALENDAR</calendar-data></response>`.replace(/&#13;\n/g, '\n');
         new Date(1)
       );
 
-      // DTSTART;TZID=Pacific/Honolulu:20260818T102000 is taken at face value,
-      // so the wall-clock time is right for a device set to the event's zone
-      // and shifted for one that is not. See parseIcsDate in icsParser.ts.
-      expect(events[0].start.getHours()).toBe(10);
-      expect(events[0].start.getMinutes()).toBe(20);
+      // DTSTART;TZID=Pacific/Honolulu:20260818T102000 is 10:20 in Honolulu,
+      // which is 20:20 UTC. It was previously taken at face value, so the
+      // wall-clock time was only correct on a device set to the event's own
+      // zone. Asserting the instant keeps this true in every host timezone.
+      expect(events[0].start.toISOString()).toBe('2026-08-18T20:20:00.000Z');
       expect(events[0].allDay).toBe(false);
     });
 

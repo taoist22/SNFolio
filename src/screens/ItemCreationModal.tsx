@@ -348,8 +348,15 @@ export function ItemCreationModal({
         rrule: editingEvent?.rrule && !repeatRuleTouched
           ? editingEvent.rrule
           : rruleForRepeat(repeatSettings, start, isAllDay),
-        exceptionDates: editingEvent?.exceptionDates,
-        timeZone: editingEvent?.timeZone,
+        exceptionDates: !repeatRuleTouched ? editingEvent?.exceptionDates : undefined,
+        recurrenceExceptionInstants: !repeatRuleTouched ? editingEvent?.recurrenceExceptionInstants : undefined,
+        timeZone: !repeatRuleTouched ? editingEvent?.timeZone : undefined,
+        // The editor displays device-local time. Preserve the imported series
+        // zone so the selected instant is converted back to that zone's wall
+        // time for future occurrences instead of silently changing semantics.
+        recurrenceTimeZone: !repeatRuleTouched ? editingEvent?.recurrenceTimeZone : undefined,
+        recurrenceValueType: !repeatRuleTouched ? editingEvent?.recurrenceValueType : undefined,
+        recurrenceError: !repeatRuleTouched ? editingEvent?.recurrenceError : undefined,
         caldavUrl: editingEvent?.caldavUrl,
         etag: editingEvent?.etag,
         sourceKind: editingEvent?.sourceKind || 'local',

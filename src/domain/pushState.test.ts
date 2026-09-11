@@ -51,9 +51,41 @@ describe('CalDAV push state', () => {
     ['description', { description: 'Bring paperwork' }],
     ['completion', { completed: true }],
     ['alarm', { alarmMinutesBefore: 15 }],
+    // Everything below reaches the server through generateOutboundIcs* and was
+    // absent from the signature, so an edit touching only one of these fields
+    // was silently treated as already synchronised.
+    ['repeat rule', { rrule: 'FREQ=WEEKLY;BYDAY=MO' }],
+    ['all-day exception date', { exceptionDates: ['2026-08-25'] }],
+    ['timed exception instant', { recurrenceExceptionInstants: ['2026-08-25T20:20:00.000Z'] }],
+    ['recurrence timezone', { recurrenceTimeZone: 'America/New_York' }],
+    ['recurrence value type', { recurrenceValueType: 'zoned' as const }],
+    ['organizer', { organizer: { name: 'Ada', email: 'ada@example.com' } }],
+    ['attendee list', { attendees: [{ name: 'Ada', email: 'ada@example.com', status: 'ACCEPTED' as const }] }],
+    ['attendee response', { attendees: [{ name: 'Ada', email: 'ada@example.com', status: 'DECLINED' as const }] }],
+    ['task-mirror flag', { isTaskMirror: true }],
   ])('editing the %s marks the item dirty again', (_label, change) => {
     const state = recordPush(emptyPushState(COLLECTION), makeEvent());
     expect(needsPush(makeEvent(change as Partial<CalendarEvent>), state)).toBe(true);
+  });
+
+  test('a repeat-rule-only edit is still uploaded', () => {
+    // The regression that motivated widening the signature: nothing the old
+    // signature covered changes, so the edit looked already-pushed and the
+    // series silently stayed on its previous rule on the server.
+    const original = makeEvent({ rrule: 'FREQ=DAILY' });
+    const state = recordPush(emptyPushState(COLLECTION), original);
+
+    expect(needsPush(makeEvent({ rrule: 'FREQ=WEEKLY;BYDAY=MO,WE' }), state)).toBe(true);
+  });
+
+  test('deleting one occurrence of a series is uploaded', () => {
+    const series = makeEvent({ rrule: 'FREQ=DAILY' });
+    const state = recordPush(emptyPushState(COLLECTION), series);
+
+    expect(needsPush(
+      makeEvent({ rrule: 'FREQ=DAILY', recurrenceExceptionInstants: ['2026-08-19T20:20:00.000Z'] }),
+      state
+    )).toBe(true);
   });
 
   test('the signature ignores fields that never reach the server', () => {

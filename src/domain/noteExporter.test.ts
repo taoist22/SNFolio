@@ -170,13 +170,75 @@ describe('noteExporter', () => {
     const ics = generateOutboundIcsEvent({
       ...sampleEvent,
       rrule: 'FREQ=WEEKLY;BYDAY=MO,WE',
-      exceptionDates: ['2026-08-26'],
+      recurrenceValueType: 'utc',
+      recurrenceTimeZone: 'UTC',
+      recurrenceExceptionInstants: ['2026-08-26T10:00:00.000Z'],
       organizer: { name: 'Ada', email: 'ada@example.com' },
       attendees: [{ name: 'Grace', email: 'grace@example.com', status: 'ACCEPTED' }],
     });
     expect(ics).toContain('RRULE:FREQ=WEEKLY;BYDAY=MO,WE');
-    expect(ics).toContain('EXDATE:');
+    expect(ics).toContain('EXDATE:20260826T100000Z');
     expect(ics).toContain('ORGANIZER;CN=Ada:mailto:ada@example.com');
     expect(ics).toContain('ATTENDEE;CN=Grace;PARTSTAT=ACCEPTED:mailto:grace@example.com');
+  });
+
+  test('round-trips a TZID recurrence without converting it to fixed UTC wall time', () => {
+    const ics = generateOutboundIcsEvent({
+      ...sampleEvent,
+      start: new Date('2026-10-30T13:00:00.000Z'),
+      end: new Date('2026-10-30T14:00:00.000Z'),
+      rrule: 'FREQ=DAILY;COUNT=4',
+      timeZone: 'America/New_York',
+      recurrenceTimeZone: 'America/New_York',
+      recurrenceValueType: 'zoned',
+      recurrenceExceptionInstants: ['2026-11-01T14:00:00.000Z'],
+    });
+
+    expect(ics).toContain('DTSTART;TZID=America/New_York:20261030T090000');
+    expect(ics).toContain('DTEND;TZID=America/New_York:20261030T100000');
+    expect(ics).toContain('EXDATE;TZID=America/New_York:20261101T090000');
+    expect(ics).not.toContain('DTSTART:20261030T130000Z');
+  });
+
+  test('exports a new metadata-free recurrence as floating device-local time', () => {
+    const start = new Date(2026, 2, 7, 9, 0, 0);
+    const end = new Date(2026, 2, 7, 10, 0, 0);
+    const ics = generateOutboundIcsEvent({
+      ...sampleEvent,
+      start,
+      end,
+      rrule: 'FREQ=WEEKLY;COUNT=3',
+      recurrenceValueType: undefined,
+      recurrenceTimeZone: undefined,
+      timeZone: undefined,
+    });
+
+    expect(ics).toContain('DTSTART:20260307T090000');
+    expect(ics).toContain('DTEND:20260307T100000');
+    expect(ics).not.toMatch(/DTSTART:\d{8}T\d{6}Z/);
+  });
+
+  test('preserves exact imported DATE-TIME recurrence exceptions', () => {
+    const ics = generateOutboundIcsEvent({
+      ...sampleEvent,
+      rrule: 'FREQ=DAILY',
+      recurrenceValueType: 'utc',
+      recurrenceTimeZone: 'UTC',
+      recurrenceExceptionInstants: ['2026-08-26T14:30:00.000Z'],
+    });
+
+    expect(ics).toContain('EXDATE:20260826T143000Z');
+  });
+
+  test('does not guess an instant from a legacy date-only exception on a timed event', () => {
+    const ics = generateOutboundIcsEvent({
+      ...sampleEvent,
+      rrule: 'FREQ=DAILY',
+      exceptionDates: ['2026-08-26'],
+      recurrenceTimeZone: 'Pacific/Honolulu',
+      recurrenceValueType: 'zoned',
+    });
+
+    expect(ics).not.toContain('EXDATE:');
   });
 });

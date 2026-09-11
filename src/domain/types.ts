@@ -223,8 +223,16 @@ export interface CalendarEvent {
   rrule?: string;
   recurringSeriesId?: string;
   exceptionDates?: string[];
+  /** Exact recurrence instants excluded by imported EXDATE or RECURRENCE-ID. */
+  recurrenceExceptionInstants?: string[];
   /** IANA zone carried by DTSTART, e.g. Pacific/Honolulu. */
   timeZone?: string;
+  /** Zone used to expand RRULEs. UTC is explicit; undefined means floating/device-local. */
+  recurrenceTimeZone?: string;
+  /** DTSTART value domain used to validate RRULE and exception semantics. */
+  recurrenceValueType?: 'date' | 'floating' | 'utc' | 'zoned';
+  /** Present when recurrence data is preserved but unsafe to expand automatically. */
+  recurrenceError?: string;
   /** Original instance replaced by a RECURRENCE-ID override. */
   recurrenceId?: Date;
   /** CalDAV resource metadata used for conflict-safe updates. */

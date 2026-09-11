@@ -67,6 +67,7 @@ import {
   selectItemsToPush,
   selectRemovedUids,
 } from '../domain/pushState';
+import { persistSuccessfulEventPush } from '../domain/eventSync';
 import {
   normaliseCollectionUrl,
   taskBelongsToCollection,
@@ -2622,10 +2623,16 @@ export function AgendaScreen(): React.JSX.Element {
     const master = allParsedEvents.find(evt => evt.uid === targetId) || storedLocal || storedRemote;
     if (master) {
       const serverBacked = Boolean(storedRemote || master.caldavUrl);
-      const updated = {
+      let updated: CalendarEvent = {
         ...master,
-        exceptionDates: [...new Set([...(master.exceptionDates || []), dateStr])],
+        exceptionDates: master.allDay
+          ? [...new Set([...(master.exceptionDates || []), dateStr])]
+          : master.exceptionDates,
+        recurrenceExceptionInstants: master.allDay
+          ? master.recurrenceExceptionInstants
+          : [...new Set([...(master.recurrenceExceptionInstants || []), event.start.toISOString()])],
       };
+      let storedByPush = false;
       if (serverBacked && caldavEnabled && caldavAppleId && caldavPassword) {
         const pushed = await caldavService.pushIcloudEvent(updated, {
           provider: caldavProvider,
@@ -2640,10 +2647,17 @@ export function AgendaScreen(): React.JSX.Element {
           setPendingDeleteEvent(null);
           return;
         }
+        updated = persistSuccessfulEventPush(
+          calendarStorage,
+          caldavUrl,
+          updated,
+          pushed
+        );
+        storedByPush = true;
       }
       setAllParsedEvents(prev => prev.map(evt => evt.uid === targetId ? updated : evt));
-      if (storedLocal) calendarStorage.addUserEvent(updated);
-      if (storedRemote) {
+      if (!storedByPush && storedLocal) calendarStorage.addUserEvent(updated);
+      if (!storedByPush && storedRemote) {
         calendarStorage.setCaldavEvents(
           calendarStorage.getCaldavEvents().map(evt => evt.uid === targetId ? updated : evt)
         );
@@ -2813,6 +2827,7 @@ export function AgendaScreen(): React.JSX.Element {
       recurringSeriesId: undefined,
       recurrenceId: undefined,
       exceptionDates: undefined,
+      recurrenceExceptionInstants: undefined,
       caldavUrl: undefined,
       etag: undefined,
       sourceKind: 'local',

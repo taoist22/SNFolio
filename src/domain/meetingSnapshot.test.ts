@@ -7,8 +7,11 @@ describe('meetingSnapshot', () => {
     summary: 'Q3 Product Strategy Sync',
     description: '1. Review Q3 Goals\n2. Design System updates',
     location: 'Conference Room 4B / Zoom',
-    start: new Date('2026-08-16T10:00:00Z'),
-    end: new Date('2026-08-16T11:00:00Z'),
+    // Device-local wall time on purpose. A note is filed under the local date
+    // its meeting appears on, so pinning the instant in UTC would assert a
+    // filename that only holds in host zones sitting close to UTC.
+    start: new Date(2026, 7, 16, 10, 0, 0),
+    end: new Date(2026, 7, 16, 11, 0, 0),
     allDay: false,
     organizer: { name: 'Sarah Connor', email: 's.connor@acme.com' },
     attendees: [

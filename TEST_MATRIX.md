@@ -51,3 +51,26 @@ build number and mark each result Pass, Fail, or Not Tested.
 | CORE-02 | Create a Project note while the keyboard is open | One tap creates and immediately opens the new note. |
 | CORE-03 | Open another note without deliberately lassoing ink | No handwriting or selection transfers between notes. |
 | CORE-04 | Restart SNFolio | Projects, Areas, Resources, tasks, folders, and settings persist. |
+
+## Build 47 (0.1.20-rc.1) combined PR candidate
+
+Clean native build and explicit native package validation: Pass (94 Gradle tasks executed; app.npk included).
+
+Sources: main 6c86af6 plus PR #2 c195b97. Includes both deletion fixes and current task-note linking. Parser-only lint cleanup replaces unused destructuring aliases with deletion of the same internal properties on a copy.
+
+- TypeScript: Pass.
+- Lint: Pass, zero errors and 529 warnings.
+- Full suite: 622 tests / 41 suites pass in UTC, Pacific/Honolulu, America/Chicago, America/New_York, Australia/Sydney, Pacific/Kiritimati, and Asia/Kolkata. UTC coverage generated.
+- Device checks below: Not Tested for build 47. Build 46 previously passed occurrence-then-series deletion on device; build 45 previously passed the reported stuck-series deletion.
+
+### Device checklist
+
+Use disposable events in the connected iCloud calendar. No imported synthetic ICS or simulated CalDAV data is needed.
+
+1. **Deletion:** Create a daily series in Apple Calendar and sync it into SNFolio. Delete one occurrence in SNFolio, wait for success, then delete the entire series without refreshing first. Refresh afterward and check Apple Calendar too: the series must be gone.
+2. **Recurrence and sync:** In SNFolio, create a daily event ending after three occurrences and a weekly event ending on a chosen date. Sync and compare with Apple Calendar: dates, times, and final occurrences must agree. Edit one series title and sync again; it must remain one series. Also spot-check a monthly and a yearly repeat.
+3. **Timezone/DST:** In Apple Calendar, create a weekly 10:00 AM America/New_York event starting October 25, 2026, ending after three occurrences. Compare October 25, November 1, and November 8 in SNFolio with Apple Calendar displayed in the same device timezone. On a Honolulu device, the expected times are 4:00 AM, 5:00 AM, and 5:00 AM respectively. Do not change the Supernote clock. If timezone selection is unavailable in your Apple Calendar interface, mark this item Not Tested.
+4. **All-day and moved occurrence:** Create an all-day repeat in Apple Calendar and move just one occurrence to another date. After sync, confirm SNFolio shows the replacement once, omits its original date, and retains the other occurrences. Delete the whole disposable series in SNFolio and verify none return after sync.
+5. **Restart and existing data:** Restart SNFolio. Confirm recurring edits/deletions persist, normal events remain correct, and an existing task's linked note still opens.
+
+Record Pass/Fail/Not Tested for each item and any exact error. These are device acceptance checks; automated tests provide the broader recurrence edge-case coverage.

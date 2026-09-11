@@ -26,6 +26,9 @@ export function EventDetailsModal({
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
   if (!event) return <></>;
+  const recurrenceWarning = event.recurrenceError && event.recurrenceError.length > 240
+    ? `${event.recurrenceError.slice(0, 237)}...`
+    : event.recurrenceError;
   const when = event.allDay
     ? event.start.toLocaleDateString()
     : `${event.start.toLocaleDateString()} · ${event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–${event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
@@ -43,6 +46,11 @@ export function EventDetailsModal({
             <Text allowFontScaling={false} style={styles.source}>
               {readOnly ? 'Read-only subscribed calendar' : 'Editable calendar event'} · {event.calendarName || 'Calendar'}
             </Text>
+            {recurrenceWarning ? (
+              <Text allowFontScaling={false} style={styles.warning}>
+                Recurrence not expanded: {recurrenceWarning}. Only the original event is shown.
+              </Text>
+            ) : null}
             {event.location ? <Text allowFontScaling={false} style={styles.body}>📍 {event.location}</Text> : null}
             {event.description ? <Text allowFontScaling={false} style={styles.body}>{event.description}</Text> : null}
           </ScrollView>
@@ -95,6 +103,7 @@ const styles = StyleSheet.create({
   details: { maxHeight: 260 },
   when: { fontSize: 16, fontWeight: 'bold', color: '#000', marginTop: 12 },
   source: { fontSize: 13, color: '#303030', backgroundColor: '#eee', padding: 7, marginVertical: 9 },
+  warning: { fontSize: 13, color: '#000', borderWidth: 2, borderColor: '#000', padding: 8, marginBottom: 9 },
   body: { fontSize: 14, color: '#000', marginBottom: 8 },
   noteAction: { borderWidth: 2, borderColor: '#000', borderRadius: 6, paddingVertical: 11, alignItems: 'center', marginTop: 10 },
   noteActionText: { color: '#000', fontSize: 15, fontWeight: 'bold' },
