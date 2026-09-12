@@ -1,3 +1,5 @@
+import { formatDateTime } from '../domain/timeOfDay';
+import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarEvent, CalendarTask } from '../domain/types';
@@ -42,6 +44,7 @@ export function CalendarWeekView({
   weeklyNoteExists = false,
   onOpenWeeklyNote,
 }: CalendarWeekViewProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   const start = startOfPlannerWeek(selectedDate, weekStartsOn);
   const days = Array.from({ length: dayCount }, (_, offset) => {
     const day = new Date(start);
@@ -116,7 +119,7 @@ export function CalendarWeekView({
                 {shownEvents.map(event => (
                   <TouchableOpacity key={`${event.uid}-${event.start.toISOString()}`} style={styles.itemRow} onPress={() => onOpenEvent(event)}>
                     <Text allowFontScaling={false} style={styles.eventText} numberOfLines={2}>
-                      ○ {event.allDay ? 'All day' : event.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}{' '}{event.summary}
+                      ○ {event.allDay ? 'All day' : formatDateTime(event.start, timeFormat)}{' '}{event.summary}
                     </Text>
                   </TouchableOpacity>
                 ))}

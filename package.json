@@ -1,6 +1,6 @@
 {
   "name": "SNFolio",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Plan time, organize work, and connect it with notes.",
   "author": "taoist22",
   "license": "Apache-2.0",
@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",
+    "ical.js": "2.2.1",
+    "moment-timezone": "0.6.3",
     "react": "19.0.0",
     "react-native": "0.79.2",
     "sn-plugin-lib": "^0.1.65"

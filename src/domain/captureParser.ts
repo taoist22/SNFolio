@@ -1,3 +1,4 @@
+import { formatTimeOfDay, TimeFormat } from './timeOfDay';
 /**
  * Extracts a date, a time and a title from text recognised off a lasso
  * selection, so a capture can pre-fill the creation modal instead of making
@@ -258,14 +259,14 @@ function stripSpans(text: string, spans: Array<[number, number]>): string {
     .trim();
 }
 
-function formatInterpretation(result: Omit<ParsedCapture, 'interpretation'>): string {
+function formatInterpretation(result: Omit<ParsedCapture, 'interpretation'>, timeFormat: TimeFormat = '12h'): string {
   if (result.kind === 'task') {
     return `Task${result.date ? ` · ${formatDate(result.date)}` : ''}`;
   }
   const parts = ['Event'];
   if (result.date) parts.push(formatDate(result.date));
   if (!result.allDay && result.hours !== undefined) {
-    parts.push(formatClock(result.hours, result.minutes ?? 0));
+    parts.push(formatTimeOfDay(result.hours * 60 + (result.minutes ?? 0), timeFormat));
   } else {
     parts.push('all day');
   }
@@ -276,14 +277,9 @@ function formatDate(d: Date): string {
   return d.toLocaleDateString('en-US', {weekday: 'short', day: 'numeric', month: 'short', year: 'numeric'});
 }
 
-function formatClock(hours: number, minutes: number): string {
-  const h12 = hours % 12 === 0 ? 12 : hours % 12;
-  return `${h12}:${String(minutes).padStart(2, '0')} ${hours >= 12 ? 'PM' : 'AM'}`;
-}
-
 export function parseCapturedText(
   text: string,
-  opts?: {dateOrder?: DateOrder; now?: Date},
+  opts?: {dateOrder?: DateOrder; now?: Date; timeFormat?: TimeFormat},
 ): ParsedCapture {
   const now = opts?.now ?? new Date();
   const order = opts?.dateOrder ?? 'MDY';
@@ -313,7 +309,7 @@ export function parseCapturedText(
       kind: 'task',
       ambiguousDateOrder: false,
     };
-    return {...base, interpretation: formatInterpretation(base)};
+    return {...base, interpretation: formatInterpretation(base, opts?.timeFormat)};
   }
 
   const date = dateMatch
@@ -330,5 +326,5 @@ export function parseCapturedText(
     ambiguousDateOrder: dateMatch?.ambiguous ?? false,
   };
 
-  return {...base, interpretation: formatInterpretation(base)};
+  return {...base, interpretation: formatInterpretation(base, opts?.timeFormat)};
 }

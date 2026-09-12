@@ -243,3 +243,10 @@ describe('meridiem as a separate control', () => {
     expect(withMeridiem(12 * 60, false)).toBe(0);
   });
 });
+
+test('24-hour format covers midnight, noon, and the end of the day', () => {
+  expect(formatTimeOfDay(0, '24h')).toBe('00:00');
+  expect(formatTimeOfDay(12 * 60, '24h')).toBe('12:00');
+  expect(formatTimeOfDay(23 * 60 + 59, '24h')).toBe('23:59');
+  expect(formatTimeOfDay(9 * 60 + 5, '24h')).toBe('09:05');
+});

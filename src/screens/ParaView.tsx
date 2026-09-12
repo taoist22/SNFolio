@@ -1,3 +1,5 @@
+import { formatDateTime } from '../domain/timeOfDay';
+import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Area, CalendarEvent, CalendarTask, Project, Resource } from '../domain/types';
@@ -108,6 +110,7 @@ export function ParaView({
   onAddTaskToProject,
   onMoveProject,
 }: ParaViewProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   const lookup: ProjectLookup = {
     projectOf,
     nameOf: (id: string) => projects.find(p => p.id === id)?.name || 'Project',
@@ -759,7 +762,7 @@ export function ParaView({
                                 <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}>{event.summary}</Text>
                                 <Text allowFontScaling={false} style={styles.projectItemMeta}>
                                   {event.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                  {event.allDay ? ' · All day' : ` · ${event.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`}
+                                  {event.allDay ? ' · All day' : ` · ${formatDateTime(event.start, timeFormat)}`}
                                 </Text>
                               </View>
                             </TouchableOpacity>

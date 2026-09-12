@@ -635,6 +635,7 @@ new_zip_package() {
     local source_dir="$1"
     local destination_path="$2"
 
+    cp -R "$source_dir/../../licenses" "$source_dir/licenses"
     write_color_output "Packaging directory: $source_dir" "Blue"
     [[ ! -d "$source_dir" ]] && { write_color_output "Source directory does not exist" "Red"; return 1; }
     [[ -z "$(ls -A "$source_dir")" ]] && { write_color_output "Source directory is empty" "Yellow"; return 1; }

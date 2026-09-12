@@ -90,3 +90,16 @@ describe('noteIdentity', () => {
     );
   });
 });
+
+test('24-hour snapshot uses 00:00 for midnight without changing event dates', () => {
+  const event = {
+    uid: 'midnight', summary: 'Night shift', attendees: [], allDay: false,
+    start: new Date('2026-09-12T00:00:00Z'), end: new Date('2026-09-12T13:15:00Z'), timeZone: 'UTC',
+  };
+  const before = event.start.getTime();
+  const text = JSON.stringify(createMeetingSnapshot(event, 'meeting', '24h'));
+  expect(text).toContain('00:00');
+  expect(text).toContain('13:15');
+  expect(text).not.toContain('24:00');
+  expect(event.start.getTime()).toBe(before);
+});

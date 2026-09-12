@@ -1,3 +1,4 @@
+import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarEvent } from '../domain/types';
@@ -36,6 +37,7 @@ export function DayScheduleGrid({
   onDeleteEvent,
   typeLabel,
 }: DayScheduleGridProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   // The grid grows with the hours chosen; the Day View already scrolls, so a
   // longer day makes a taller page rather than a squashed one.
   const options = { ...DEFAULT_DAY_GRID, startHour, endHour };
@@ -66,7 +68,7 @@ export function DayScheduleGrid({
             pointerEvents="none"
           >
             <Text allowFontScaling={false} style={styles.hourLabel}>
-              {hourLabel(hour)}
+              {hourLabel(hour, timeFormat)}
             </Text>
             <View style={styles.hourLine} />
           </View>

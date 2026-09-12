@@ -1,0 +1,10 @@
+{"name":"utc","result":{"starts":["2026-09-14T10:00:00.000Z"],"zone":"UTC"}}
+{"name":"windows-1601-definition","result":{"starts":["2026-10-18T08:00:00.000Z","2026-10-25T09:00:00.000Z","2026-11-01T09:00:00.000Z"],"zone":"W. Europe Standard Time"}}
+{"name":"custom-definition","result":{"starts":["2026-10-18T08:00:00.000Z","2026-10-25T09:00:00.000Z","2026-11-01T09:00:00.000Z"],"zone":"Custom/Office"}}
+{"name":"iana-definition","result":{"starts":["2026-10-18T08:00:00.000Z","2026-10-25T09:00:00.000Z","2026-11-01T09:00:00.000Z"],"zone":"Europe/Berlin"}}
+{"name":"iana-without-definition","result":{"starts":["2026-10-18T20:00:00.000Z","2026-10-25T20:00:00.000Z","2026-11-01T20:00:00.000Z"],"zone":"floating"}}
+{"name":"windows-without-definition","result":{"starts":["2026-10-18T20:00:00.000Z","2026-10-25T20:00:00.000Z","2026-11-01T20:00:00.000Z"],"zone":"floating"}}
+{"name":"unknown-without-definition","result":{"starts":["2026-10-18T20:00:00.000Z","2026-10-25T20:00:00.000Z","2026-11-01T20:00:00.000Z"],"zone":"floating"}}
+{"name":"rdate-exdate","result":{"starts":["2026-09-14T10:00:00.000Z","2026-09-16T10:00:00.000Z","2026-09-18T10:00:00.000Z"],"zone":"UTC"}}
+{"name":"moved-occurrence","result":{"starts":["2026-09-14T10:00:00.000Z","2026-09-15T13:00:00.000Z","2026-09-16T10:00:00.000Z"],"zone":"UTC"}}
+{"name":"monthly-last-weekday","result":{"starts":["2026-09-30T10:00:00.000Z","2026-10-30T10:00:00.000Z","2026-11-30T10:00:00.000Z"],"zone":"UTC"}}

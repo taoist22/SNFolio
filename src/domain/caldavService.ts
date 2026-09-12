@@ -1,6 +1,6 @@
 import { CalendarEvent } from './types';
 import { generateOutboundIcsEvent, generateOutboundIcsTodo } from './noteExporter';
-import { parseIcsContent } from './icsParser';
+import { parseIcsContentStrict } from './icsParser';
 
 /**
  * Items created before the isTask flag existed are identified by the legacy
@@ -820,7 +820,7 @@ export class CaldavService {
         // so the existing parser handles it unchanged.
         const resourceUrl = resolveUrl(collectionUrl, readBlockHref(block));
         const etag = readBlockEtag(block);
-        events.push(...parseIcsContent(ics, calendarName).map(event => ({
+        events.push(...parseIcsContentStrict(ics, calendarName).map(event => ({
           ...event,
           sourceKind: 'caldav' as const,
           caldavUrl: resourceUrl,
@@ -864,7 +864,7 @@ export class CaldavService {
         const ics = extractCalendarData(block);
         const resourceUrl = resolveUrl(collectionUrl, readBlockHref(block));
         const etag = readBlockEtag(block);
-        return ics ? parseIcsContent(ics, 'CalDAV Tasks').filter(isTaskItem).map(task => ({
+        return ics ? parseIcsContentStrict(ics, 'CalDAV Tasks').filter(isTaskItem).map(task => ({
           ...task,
           caldavUrl: resourceUrl,
           etag: etag || undefined,

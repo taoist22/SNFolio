@@ -10,6 +10,12 @@
  * ghosts on frequent redraws far better than a slider or a spinner.
  */
 
+export type TimeFormat = '12h' | '24h';
+
+export function formatDateTime(date: Date, format: TimeFormat = '12h'): string {
+  return formatTimeOfDay(minutesFromDate(date), format);
+}
+
 export const MINUTES_IN_DAY = 24 * 60;
 
 /** Smallest gap an event may have, and the fine step size. */
@@ -26,10 +32,11 @@ export function withTimeOfDay(day: Date, minutes: number): Date {
   return out;
 }
 
-export function formatTimeOfDay(minutes: number): string {
+export function formatTimeOfDay(minutes: number, format: TimeFormat = '12h'): string {
   const clamped = clampToDay(minutes);
   const hour24 = Math.floor(clamped / 60);
   const min = clamped % 60;
+  if (format === '24h') return `${String(hour24).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
   const suffix = hour24 >= 12 ? 'PM' : 'AM';
   const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
   return `${hour12}:${String(min).padStart(2, '0')} ${suffix}`;

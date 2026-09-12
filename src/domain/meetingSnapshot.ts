@@ -1,3 +1,5 @@
+import { TimeFormat } from './timeOfDay';
+import { timezoneFields } from './calendarTimezones';
 import { CalendarEvent, MeetingSnapshot, NoteKind } from './types';
 
 /** User-facing note title converted to one safe `.note` filename. */
@@ -57,7 +59,8 @@ export function generateNoteFilename(
  */
 export function createMeetingSnapshot(
   event: CalendarEvent,
-  kind: NoteKind = 'meeting'
+  kind: NoteKind = 'meeting',
+  timeFormat: TimeFormat = '12h'
 ): MeetingSnapshot {
   const dateOptions: Intl.DateTimeFormatOptions = {
     weekday: 'short',
@@ -69,13 +72,25 @@ export function createMeetingSnapshot(
   const timeOptions: Intl.DateTimeFormatOptions = {
     hour: '2-digit',
     minute: '2-digit',
-    hour12: true,
+    ...(timeFormat === '24h' ? { hourCycle: 'h23' as const } : { hour12: true }),
     ...(event.timeZone ? { timeZone: event.timeZone, timeZoneName: 'short' } : {}),
   };
 
-  const dateStr = event.start.toLocaleDateString('en-US', dateOptions);
-  const startTimeStr = event.start.toLocaleTimeString('en-US', timeOptions);
-  const endTimeStr = event.end.toLocaleTimeString('en-US', timeOptions);
+  const embeddedId = event.recurrenceTimeZone;
+  const usesEmbedded = Boolean(embeddedId && event.timezoneDefinitions?.[embeddedId]);
+  const displayDate = (date: Date) => {
+    if (!usesEmbedded || !embeddedId) return date;
+    const f = timezoneFields(date, embeddedId, event.timezoneDefinitions);
+    return new Date(Date.UTC(f.year, f.month, f.day, f.hour, f.minute, f.second));
+  };
+  if (usesEmbedded) {
+    dateOptions.timeZone = 'UTC';
+    timeOptions.timeZone = 'UTC';
+    delete timeOptions.timeZoneName;
+  }
+  const dateStr = displayDate(event.start).toLocaleDateString('en-US', dateOptions);
+  const startTimeStr = displayDate(event.start).toLocaleTimeString('en-US', timeOptions);
+  const endTimeStr = displayDate(event.end).toLocaleTimeString('en-US', timeOptions) + (usesEmbedded ? ` (${embeddedId})` : '');
   const timeStr = event.allDay ? 'All Day' : `${startTimeStr} – ${endTimeStr}`;
 
   const isAcademic = kind === 'class';

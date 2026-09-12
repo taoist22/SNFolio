@@ -1,5 +1,5 @@
 import { CalendarEvent, CalendarFeed } from './types';
-import { parseIcsContent } from './icsParser';
+import { parseIcsContentStrict } from './icsParser';
 
 export function normaliseFeedUrl(raw: string): string | null {
   const url = raw.trim().replace(/^webcal:\/\//i, 'https://');
@@ -18,7 +18,7 @@ export async function fetchCalendarFeed(
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const text = await response.text();
   if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('Response is not an iCalendar feed.');
-  return parseIcsContent(text, name).map(event => ({
+  return parseIcsContentStrict(text, name).map(event => ({
     ...event,
     sourceKind: 'feed' as const,
     sourceFeedId: feedId,
@@ -28,11 +28,12 @@ export async function fetchCalendarFeed(
 export async function refreshCalendarFeeds(
   feeds: CalendarFeed[],
   fetcher: typeof fetch = fetch
-): Promise<{ events: CalendarEvent[]; successful: number; failed: number }> {
+): Promise<{ events: CalendarEvent[]; successful: number; failed: number; errors?: string[] }> {
   const enabled = feeds.filter(feed => feed.enabled && feed.url);
   const events: CalendarEvent[] = [];
   let successful = 0;
   let failed = 0;
+  const errors: string[] = [];
   for (const feed of enabled) {
     try {
       events.push(...await fetchCalendarFeed(
@@ -42,9 +43,10 @@ export async function refreshCalendarFeeds(
         feed.id
       ));
       successful++;
-    } catch (_error) {
+    } catch (error) {
       failed++;
+      errors.push(`${feed.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return { events, successful, failed };
+  return { events, successful, failed, ...(errors.some(message => message.includes("Calendar import needs attention")) ? { errors } : {}) };
 }

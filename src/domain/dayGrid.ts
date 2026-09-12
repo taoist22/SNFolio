@@ -1,3 +1,4 @@
+import { TimeFormat } from './timeOfDay';
 import { CalendarEvent } from './types';
 import { minutesFromDate } from './timeOfDay';
 
@@ -143,7 +144,8 @@ export function placeEvents(
 }
 
 /** Label for an hour line: "8 AM", "12 PM". */
-export function hourLabel(hour: number): string {
+export function hourLabel(hour: number, format: TimeFormat = '12h'): string {
+  if (format === '24h') return `${String(hour % 24).padStart(2, '0')}:00`;
   const suffix = hour >= 12 ? 'PM' : 'AM';
   const twelve = hour % 12 === 0 ? 12 : hour % 12;
   return `${twelve} ${suffix}`;

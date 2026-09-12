@@ -1067,6 +1067,8 @@ function New-ZipPackage {
     }
     
     try {
+        $licenseSource = Join-Path (Split-Path (Split-Path $SourceDir -Parent) -Parent) 'licenses'
+        Copy-Item -Path $licenseSource -Destination $SourceDir -Recurse -Force
         # Use PowerShell 5.0+ Compress-Archive command
         if (Get-Command 'Compress-Archive' -ErrorAction SilentlyContinue) {
             # If target file already exists, delete it first

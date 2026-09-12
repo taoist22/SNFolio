@@ -1,3 +1,6 @@
+import { SettingChoice } from './SettingChoice';
+import { TimeFormatContext } from './TimeFormatContext';
+import { TimeFormat, formatDateTime } from '../domain/timeOfDay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -6,7 +9,6 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -44,7 +46,7 @@ import {
   templateLabel,
   templateSettingKey,
 } from '../domain/noteTemplates';
-import { expandEventsForDate, parseIcsContent } from '../domain/icsParser';
+import { expandEventsForDate, parseIcsContentStrict } from '../domain/icsParser';
 import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
 import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
@@ -257,6 +259,7 @@ export function AgendaScreen(): React.JSX.Element {
   const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
 
   // Settings & CalDAV States
+  const [timeFormat, setTimeFormat] = useState<TimeFormat>('12h');
   const [hideAllDay, setHideAllDay] = useState<boolean>(false);
   const [hideSolo, setHideSolo] = useState<boolean>(false);
   const [caldavEnabled, setCaldavEnabled] = useState<boolean>(false);
@@ -375,6 +378,7 @@ export function AgendaScreen(): React.JSX.Element {
     }
     setCalendarFeeds([...settings.feeds]);
     setViewMode(settings.defaultViewMode || 'month');
+    setTimeFormat(settings.timeFormat === '24h' ? '24h' : '12h');
     setHideAllDay(settings.hideAllDayEvents);
     setHideSolo(settings.hideSoloEvents);
     setTargetNotesDir(settings.notesDirectory || '/storage/emulated/0/Note/Meetings');
@@ -453,6 +457,7 @@ export function AgendaScreen(): React.JSX.Element {
             // Pull a date/time out of the writing so the modal opens ready to
             // save, rather than making the user navigate to a date.
             const parsed = parseCapturedText(capture.text, {
+              timeFormat: calendarStorage.getSettings().timeFormat,
               dateOrder: resolveDateOrder(calendarStorage.getSettings().dateOrder),
             });
 
@@ -658,34 +663,36 @@ export function AgendaScreen(): React.JSX.Element {
     fetched = feedResult.events;
     successfulFeeds = feedResult.successful;
     failedFeeds = feedResult.failed;
+    const importErrors = [...(feedResult.errors || [])];
 
     for (const feed of localFeeds) {
       try {
         const path = feed.localPath as string;
         const text = await readCalendarText(path);
         if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('Not an iCalendar file');
-        fetched.push(...parseIcsContent(text, feed.name || 'Imported Calendar').map(event => ({
+        fetched.push(...parseIcsContentStrict(text, feed.name || 'Imported Calendar').map(event => ({
           ...event,
           sourceKind: 'feed' as const,
           sourceFeedId: feed.id,
         })));
         successfulFeeds++;
-      } catch (_error) {
+      } catch (error) {
         failedFeeds++;
+        importErrors.push(error instanceof Error ? error.message : String(error));
       }
     }
 
     if (configuredFeeds.length + localFeeds.length > 0) {
       // An empty but successful calendar is authoritative and must clear the
       // previous batch. Only retain cached events when every request failed.
-      if (successfulFeeds > 0) applyFeedBatch(fetched);
+      if (successfulFeeds > 0 && !importErrors.length) applyFeedBatch(fetched);
       setHasSubscribedFeeds(true);
-      if (successfulFeeds === 0) {
-        setStatusMsg(`Could not refresh ${failedFeeds} subscribed feed(s); showing cached events.`);
+      if (successfulFeeds === 0 || importErrors.length) {
+        setStatusMsg(importErrors[0] || `Could not refresh ${failedFeeds} subscribed feed(s); showing cached events.`);
       } else {
         setStatusMsg(
           `Refreshed ${fetched.length} event(s) from ${successfulFeeds} feed(s)` +
-          (failedFeeds ? ` — ${failedFeeds} failed.` : '.')
+          (failedFeeds ? ` — ${failedFeeds} failed. ${importErrors[0] || ""}` : '.')
         );
       }
       return {
@@ -1447,7 +1454,7 @@ export function AgendaScreen(): React.JSX.Element {
           feed => feed.localPath === chosenPath || feed.name === fileName
         );
         const localFeedId = existingLocalFeed?.id || `file-${Date.now()}`;
-        const evts = parseIcsContent(content, fileName).map(event => ({
+        const evts = parseIcsContentStrict(content, fileName).map(event => ({
           ...event,
           sourceKind: 'feed' as const,
           sourceFeedId: localFeedId,
@@ -3271,7 +3278,7 @@ export function AgendaScreen(): React.JSX.Element {
       }),
       tomorrow
     );
-    return tomorrowScheduleSummary(evts);
+    return tomorrowScheduleSummary(evts, timeFormat);
   })();
 
   /** Display name of an event's type, for status lines and schedule blocks. */
@@ -3812,6 +3819,7 @@ export function AgendaScreen(): React.JSX.Element {
   })();
 
   return (
+    <TimeFormatContext.Provider value={timeFormat}>
     <SafeAreaView style={styles.root}>
       {/* Top Header Bar */}
       <View style={styles.headerBar}>
@@ -4350,12 +4358,7 @@ export function AgendaScreen(): React.JSX.Element {
         />
 
       {showSettings ? (
-        <ScrollView
-          ref={settingsScrollRef}
-          style={styles.settingsContainer}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={settingsTab === 'notes' ? styles.settingsContentCompact : styles.settingsContent}
-        >
+        <View style={styles.settingsContainer}>
           <View style={styles.settingsHeader}>
             <Text allowFontScaling={false} style={styles.settingsHeaderTitle}>⚙️ SETTINGS &amp; CONFIGURATION</Text>
             <TouchableOpacity onPress={() => setShowSettings(false)}>
@@ -4382,6 +4385,12 @@ export function AgendaScreen(): React.JSX.Element {
             ))}
           </View>
 
+          <ScrollView
+            ref={settingsScrollRef}
+            style={styles.settingsBody}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={settingsTab === 'notes' ? styles.settingsContentCompact : styles.settingsContent}
+          >
           {settingsTab === 'sync' && (
             <>
           {(syncPhase !== 'idle' || lastSuccessfulSync) && (
@@ -4394,7 +4403,7 @@ export function AgendaScreen(): React.JSX.Element {
               </Text>
               {lastSuccessfulSync !== '' && (
                 <Text allowFontScaling={false} style={styles.checkSettingHint}>
-                  Last fully successful: {new Date(lastSuccessfulSync).toLocaleString()}
+                  Last fully successful: {new Date(lastSuccessfulSync).toLocaleDateString()} {formatDateTime(new Date(lastSuccessfulSync), timeFormat)}
                 </Text>
               )}
               <Text allowFontScaling={false} style={styles.checkSettingHint}>
@@ -4740,15 +4749,19 @@ export function AgendaScreen(): React.JSX.Element {
             </View>
           ))}
 
+          <SettingChoice
+            label="Time format"
+            labels={['12-hour', '24-hour']}
+            value={timeFormat === '24h'}
+            onChange={enabled => {
+              const format = enabled ? '24h' : '12h';
+              setTimeFormat(format);
+              calendarStorage.updateSettings({ timeFormat: format });
+            }}
+          />
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 12 }]}>Smart Event Filters</Text>
-          <View style={styles.filterToggleRow}>
-            <Text allowFontScaling={false} style={styles.bodyText}>Hide All-Day Events (Holidays, Reminders):</Text>
-            <Switch value={hideAllDay} onValueChange={handleToggleHideAllDay} />
-          </View>
-          <View style={styles.filterToggleRow}>
-            <Text allowFontScaling={false} style={styles.bodyText}>Hide Solo Events (0 Attendees):</Text>
-            <Switch value={hideSolo} onValueChange={handleToggleHideSolo} />
-          </View>
+          <SettingChoice label="Hide All-Day Events (Holidays, Reminders)" value={hideAllDay} onChange={handleToggleHideAllDay} />
+          <SettingChoice label="Hide Solo Events (0 Attendees)" value={hideSolo} onChange={handleToggleHideSolo} />
           </View>
           </View>
             </>
@@ -5166,7 +5179,7 @@ export function AgendaScreen(): React.JSX.Element {
             <TouchableOpacity style={styles.nudgeBtn} onPress={() => shiftScheduleHour('start', -1)}>
               <Text allowFontScaling={false} style={styles.nudgeText}>−</Text>
             </TouchableOpacity>
-            <Text allowFontScaling={false} style={styles.hourValue}>{hourLabel(scheduleStartHour)}</Text>
+            <Text allowFontScaling={false} style={styles.hourValue}>{hourLabel(scheduleStartHour, timeFormat)}</Text>
             <TouchableOpacity style={styles.nudgeBtn} onPress={() => shiftScheduleHour('start', 1)}>
               <Text allowFontScaling={false} style={styles.nudgeText}>+</Text>
             </TouchableOpacity>
@@ -5175,7 +5188,7 @@ export function AgendaScreen(): React.JSX.Element {
             <TouchableOpacity style={styles.nudgeBtn} onPress={() => shiftScheduleHour('end', -1)}>
               <Text allowFontScaling={false} style={styles.nudgeText}>−</Text>
             </TouchableOpacity>
-            <Text allowFontScaling={false} style={styles.hourValue}>{hourLabel(scheduleEndHour)}</Text>
+            <Text allowFontScaling={false} style={styles.hourValue}>{hourLabel(scheduleEndHour, timeFormat)}</Text>
             <TouchableOpacity style={styles.nudgeBtn} onPress={() => shiftScheduleHour('end', 1)}>
               <Text allowFontScaling={false} style={styles.nudgeText}>+</Text>
             </TouchableOpacity>
@@ -5214,7 +5227,7 @@ export function AgendaScreen(): React.JSX.Element {
               <Text allowFontScaling={false} style={styles.checkSettingHint}>
                 This is the simplest way to make dated Supernote tasks visible on Apple devices.
                 It creates calendar events with an alert at the task's due time, not Apple
-                Reminders. Date-only tasks alert at 9:00 AM; completed tasks get a ✓ in the title;
+                Reminders. Date-only tasks alert at {timeFormat === '24h' ? '09:00' : '9:00 AM'}; completed tasks get a ✓ in the title;
                 undated tasks cannot be mirrored onto a day.
               </Text>
             </View>
@@ -5318,7 +5331,8 @@ export function AgendaScreen(): React.JSX.Element {
             </>
           )}
 
-        </ScrollView>
+          </ScrollView>
+        </View>
       ) : (
         <View style={styles.mainContent}>
           {/* Touch Navigation Bar */}
@@ -5996,6 +6010,7 @@ export function AgendaScreen(): React.JSX.Element {
         </View>
       )}
     </SafeAreaView>
+    </TimeFormatContext.Provider>
   );
 }
 
@@ -7358,6 +7373,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   // Room to lift the last settings field above the on-screen keyboard.
+  settingsBody: { flex: 1, minHeight: 0 },
   settingsContent: {
     paddingBottom: 260,
   },

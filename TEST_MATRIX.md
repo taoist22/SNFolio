@@ -80,3 +80,39 @@ Record Pass/Fail/Not Tested for each item and any exact error. These are device 
 Maintainer confirmed all five build 47 device acceptance checks passed: occurrence/series deletion; bounded recurrence, editing and sync; New York DST display; all-day moved occurrence and series cleanup; restart persistence and linked note opening.
 
 Build 48 promotes the tested application code unchanged. Only version metadata changes from 0.1.20-rc.1/build 47 to 0.1.20/build 48.
+
+## Build 49 — 0.1.21-rc.1 timezone compatibility candidate
+
+- Offline database: IANA 2026c via moment-timezone 0.6.3; Microsoft mappings from CLDR 47.
+- Existing 622 tests plus 9 timezone integration tests: Pass (631 total). Seven timezone environments pass.
+- TypeScript: Pass. Lint: zero errors.
+- Original reporter’s private Outlook file: unavailable; no file requested. Synthetic Microsoft-format cases pass locally.
+- iCloud occurrence-then-series deletion on this candidate: maintainer reported passing.
+- Maintainer reported the requested device checks working, including recurrence/all-day and restart checks.
+- See docs/CALENDAR_TIMEZONE_SUPPORT.md for the acceptance procedure and scope.
+
+Build 49 clean native package validation: Pass. Host Hermes bytecode/runtime checks: Pass for Microsoft/custom embedded definitions and missing IANA/Windows definitions.
+
+## Build 50 — 0.1.21-rc.2 timezone and clock candidate
+
+- Saved 24-hour clock switch under Settings → Calendar; defaults to 12-hour.
+- Calendar labels, event details, creation pickers, capture interpretation, and tomorrow summary honor the preference. Snapshot text formatter also accepts the preference; current native note creation uses templates rather than inserting snapshot text.
+- Midnight displays 00:00; 24-hour picker offers 00–23. Switching format does not edit event dates or sync data.
+- 635 tests / 43 suites pass; typecheck passes; lint has zero errors (549 warnings).
+- Device acceptance of the new clock option: pending.
+- Clean build and native package validation: pass; packaged manifest confirms 0.1.21-rc.2/build 50 and app.npk.
+
+## Build 51 — 0.1.21-rc.3 settings usability candidate
+
+- Settings title, Close control, and four section buttons are outside the content ScrollView and remain visible while scrolling. Existing section-change scroll reset is retained.
+- Time format uses 12-hour / 24-hour choices. Hide All-Day and Hide Solo use OFF / ON choices. Selected choices have solid black backgrounds and white labels, with explicit accessibility checked state and 44-point minimum touch height.
+- Existing stored preferences and their update handlers are retained.
+- Typecheck passes; 635 tests / 43 suites pass; lint has zero errors (549 existing warnings).
+- Nomad acceptance pending: scroll each section, switch sections while scrolled down, check selected-state clarity, and confirm preferences after restart.
+- Clean build and native package validation pass; packaged manifest confirms 0.1.21-rc.3/build 51 and app.npk.
+
+## Release 0.1.21 / build 52
+
+The maintainer accepted build 51 on the Nomad (“this is good”) and authorized release. Build 52 promotes the same application code with final version metadata; README documentation was updated after candidate acceptance.
+
+Final checks: 635 tests / 43 suites pass; TypeScript passes; lint has zero errors (549 warnings); clean build and native package validation pass, including app.npk and final version 0.1.21/build 52.

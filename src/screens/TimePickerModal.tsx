@@ -1,3 +1,4 @@
+import { useTimeFormat } from './TimeFormatContext';
 import React, { useEffect, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { clampToDay, formatTimeOfDay, isPm, withMeridiem } from '../domain/timeOfDay';
@@ -18,6 +19,7 @@ export function TimePickerModal({
   onSelect,
   onClose,
 }: TimePickerModalProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   const [draft, setDraft] = useState(value);
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export function TimePickerModal({
   }, [visible, value]);
 
   const chooseHour = (hour12: number) => {
-    const hour = hour12 % 12 + (isPm(draft) ? 12 : 0);
+    const hour = timeFormat === '24h' ? hour12 : hour12 % 12 + (isPm(draft) ? 12 : 0);
     setDraft(hour * 60 + (draft % 60));
   };
 
@@ -44,19 +46,19 @@ export function TimePickerModal({
             </TouchableOpacity>
           </View>
 
-          <Text allowFontScaling={false} style={styles.preview}>{formatTimeOfDay(draft)}</Text>
+          <Text allowFontScaling={false} style={styles.preview}>{formatTimeOfDay(draft, timeFormat)}</Text>
 
           <View style={styles.hourGrid}>
-            {Array.from({ length: 12 }, (_, index) => index + 1).map(hour => {
-              const selected = (Math.floor(draft / 60) % 12 || 12) === hour;
+            {Array.from({ length: timeFormat === '24h' ? 24 : 12 }, (_, index) => timeFormat === '24h' ? index : index + 1).map(hour => {
+              const selected = (timeFormat === '24h' ? Math.floor(draft / 60) : (Math.floor(draft / 60) % 12 || 12)) === hour;
               return (
                 <TouchableOpacity
-                  key={hour}
+                  key={timeFormat === '24h' ? String(hour).padStart(2, '0') : hour}
                   style={[styles.hourButton, selected && styles.selected]}
                   onPress={() => chooseHour(hour)}
                 >
                   <Text allowFontScaling={false} style={[styles.buttonText, selected && styles.selectedText]}>
-                    {hour}
+                    {timeFormat === '24h' ? String(hour).padStart(2, '0') : hour}
                   </Text>
                 </TouchableOpacity>
               );
@@ -84,7 +86,7 @@ export function TimePickerModal({
             <TouchableOpacity style={styles.adjustButton} onPress={() => setDraft(clampToDay(draft - 5))}>
               <Text allowFontScaling={false} style={styles.buttonText}>−5 min</Text>
             </TouchableOpacity>
-            {(['AM', 'PM'] as const).map(part => {
+            {timeFormat === '12h' && (['AM', 'PM'] as const).map(part => {
               const selected = isPm(draft) === (part === 'PM');
               return (
                 <TouchableOpacity
@@ -108,7 +110,7 @@ export function TimePickerModal({
               onClose();
             }}
           >
-            <Text allowFontScaling={false} style={styles.doneText}>Use {formatTimeOfDay(draft)}</Text>
+            <Text allowFontScaling={false} style={styles.doneText}>Use {formatTimeOfDay(draft, timeFormat)}</Text>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>

@@ -1,3 +1,5 @@
+import { formatDateTime } from '../domain/timeOfDay';
+import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { allocateCellRows, generateMonthGrid, MonthGridCell } from '../domain/monthGrid';
@@ -102,6 +104,7 @@ export function MonthGridView({
   onSelectDate,
   onOpenActionSheet,
 }: MonthGridViewProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   const windowHeight = Dimensions.get('window').height;
   const dynamicCellHeight = Math.max(90, Math.min(140, Math.floor((windowHeight - 260) / 6)));
 
@@ -186,7 +189,7 @@ export function MonthGridView({
                 {/* Event Snippets Inside Cell */}
                 <View style={styles.eventsSnippetContainer}>
                   {cell.events.slice(0, rows.events).map((evt, eIdx) => {
-                    const timeStr = evt.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    const timeStr = formatDateTime(evt.start, timeFormat);
                     return (
                       <Text allowFontScaling={false}
                         key={`${evt.uid}-${eIdx}`}

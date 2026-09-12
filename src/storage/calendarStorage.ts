@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: CalendarSettings = {
   seriesNotebookPrefix: 'Series - ',
   defaultViewMode: 'month',
   themeMode: 'business',
+  timeFormat: '12h',
   hideAllDayEvents: false,
   hideSoloEvents: false,
   caldavEnabled: false,

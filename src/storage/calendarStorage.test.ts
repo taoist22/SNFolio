@@ -849,3 +849,13 @@ describe('task account lifecycle persistence', () => {
     expect(store.getTaskPushState(target).records.legacy).toBeDefined();
   });
 });
+
+test('time format defaults to 12-hour and survives a storage reload', async () => {
+  const store = new CalendarStorage();
+  expect(store.getSettings().timeFormat).toBe('12h');
+  store.updateSettings({ timeFormat: '24h' });
+  await flushWrites();
+  const restored = new CalendarStorage();
+  await restored.load();
+  expect(restored.getSettings().timeFormat).toBe('24h');
+});

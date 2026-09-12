@@ -37,7 +37,7 @@ SNFolio works without an online account. Calendar connections and PARA organizat
 - **Recurring Meetings**: Handle common RRULE schedules, cancellations, and moved occurrences, then append a fresh page using the configured template to the series notebook.
 - **Repeat Controls**: Create daily, weekly, monthly, or yearly series; choose intervals and weekly days; end on a date or after a count; edit a series; and delete one occurrence or the entire series.
 - **Auto-Launch**: Immediately open a newly created note or appended page on device so you can start handwriting right away.
-- **E-Ink-Friendly Controls**: Use tap-based date, time, duration, recurrence, and folder controls with larger touch targets. A startup status banner makes it clear when calendars and tasks are still loading.
+- **E-Ink-Friendly Controls**: Use tap-based date, time, duration, recurrence, and folder controls with larger touch targets. Choose a saved 12-hour or 24-hour clock format. Settings navigation stays visible while the section contents scroll, and clock/filter choices use clearly labeled black-and-white buttons. A startup status banner makes it clear when calendars and tasks are still loading.
 
 ---
 
@@ -105,6 +105,8 @@ Subscribed feeds are read-only. Tapping one of their events shows its source and
 
 Private subscription URLs and CalDAV passwords are stored through Android Keystore-backed encryption rather than shared plugin storage.
 
+Calendar imports support embedded timezone definitions, including Microsoft Outlook Windows timezone names such as `W. Europe Standard Time` and definitions with 1601 transition dates. When definitions are missing, recognized Windows and IANA timezone names use bundled timezone data without an online lookup. Keep timezone information in the file; removing it can change event times. If a timezone cannot be resolved, SNFolio reports an import/sync error instead of silently treating it as the device timezone. See [Calendar Timezone Support](docs/CALENDAR_TIMEZONE_SUPPORT.md) for the tested scope and limitations.
+
 ### CalDAV Events and Tasks
 
 Use **⚙ → Connections & Settings → Calendars & Sync** to connect iCloud or another CalDAV server for events. Choose **Sync Now** from the ⚙ menu to push local changes first and then pull remote changes.
@@ -117,7 +119,18 @@ Connecting a task account does not upload tasks that were already stored only on
 
 After a manual sync, the Calendar & Sync page shows each source's result, pending uploads, and the time of the last fully successful sync.
 
-Time entry is tap-only for device usability: choose an hour, quarter-hour minute, and AM/PM, with ±5-minute adjustment when needed. Events use common duration buttons and expose an exact-end picker for unusual lengths.
+Time entry is tap-only for device usability: choose an hour and quarter-hour minute, with ±5-minute adjustment when needed. The 12-hour picker includes AM/PM; the 24-hour picker offers hours 00–23. Events use common duration buttons and expose an exact-end picker for unusual lengths.
+
+### Settings Navigation and Clock Format
+
+Open **⚙ → Connections & Settings**. The **Calendars & Sync**, **Notes & Storage**, **App & View**, and **Help & Setup** buttons stay visible while you scroll the selected section. Switching sections returns its contents to the top.
+
+Under **Calendars & Sync**:
+
+- **Time format**: Choose **12-hour** or **24-hour**. The preference applies to calendar times, event details, and time pickers, and is saved across restarts. The default is 12-hour; midnight in 24-hour format is **00:00**. Changing the format does not change event times or synchronization.
+- **Hide All-Day Events** and **Hide Solo Events**: Choose **ON** to hide matching events or **OFF** to show them. Solo events have no attendees. These display filters do not delete events.
+
+For all three controls, the selected choice has a **black background with white text**; the other choice has a white background and black outline.
 
 ### PARA Workspace
 

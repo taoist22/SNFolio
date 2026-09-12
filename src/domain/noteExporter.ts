@@ -1,3 +1,4 @@
+import { exportTimezoneDefinitions, timezoneFields } from './calendarTimezones';
 import { CalendarEvent } from './types';
 
 
@@ -11,26 +12,21 @@ function formatIcsDateTime(d: Date): string {
 }
 
 /** RFC 5545 local DATE-TIME form in either the device or an explicit IANA zone. */
-function formatIcsWallTime(d: Date, timeZone?: string): string {
+function formatIcsWallTime(d: Date, timeZone?: string, event?: CalendarEvent): string {
   if (!timeZone) {
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(
       d.getMinutes()
     )}${pad(d.getSeconds())}`;
   }
-  if (!/^[A-Za-z0-9._+/-]+$/.test(timeZone)) throw new Error('Invalid calendar timezone');
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }).formatToParts(d).map(part => [part.type, part.value])
-  );
-  return `${parts.year}${parts.month}${parts.day}T${parts.hour}${parts.minute}${parts.second}`;
+  const fields = timezoneFields(d, timeZone, event?.timezoneDefinitions);
+  return `${fields.year}${pad(fields.month + 1)}${pad(fields.day)}T${pad(fields.hour)}${pad(fields.minute)}${pad(fields.second)}`;
 }
 
 function formatTimedProperty(name: 'DTSTART' | 'DTEND' | 'EXDATE', d: Date, event: CalendarEvent): string {
   if (event.recurrenceValueType === 'zoned' && event.recurrenceTimeZone) {
-    return `${name};TZID=${event.recurrenceTimeZone}:${formatIcsWallTime(d, event.recurrenceTimeZone)}`;
+    if (/[\r\n";]/.test(event.recurrenceTimeZone)) throw new Error('Invalid calendar timezone');
+    const id = /[: ,]/.test(event.recurrenceTimeZone) ? `"${event.recurrenceTimeZone}"` : event.recurrenceTimeZone;
+    return `${name};TZID=${id}:${formatIcsWallTime(d, event.recurrenceTimeZone, event)}`;
   }
   if (event.recurrenceValueType === 'floating' || (!event.recurrenceValueType && event.rrule)) {
     return `${name}:${formatIcsWallTime(d)}`;
@@ -161,6 +157,7 @@ export function generateOutboundIcsEvent(event: CalendarEvent): string {
     `VERSION:2.0`,
     `PRODID:-//SNFolio for Supernote//EN`,
     `CALSCALE:GREGORIAN`,
+    ...exportTimezoneDefinitions(event.timezoneDefinitions),
     `BEGIN:VEVENT`,
     `UID:${escapeIcsText(event.uid)}`,
     `DTSTAMP:${dtStamp}`,

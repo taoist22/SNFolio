@@ -1,3 +1,4 @@
+import { useTimeFormat } from './TimeFormatContext';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
@@ -152,6 +153,7 @@ export function ItemCreationModal({
   eventProjectId,
   eventAreaId,
 }: ItemCreationModalProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   const [title, setTitle] = useState<string>('');
   const titleInputRef = useRef<HandwritingTextInputHandle>(null);
 
@@ -354,6 +356,7 @@ export function ItemCreationModal({
         // The editor displays device-local time. Preserve the imported series
         // zone so the selected instant is converted back to that zone's wall
         // time for future occurrences instead of silently changing semantics.
+        timezoneDefinitions: !repeatRuleTouched ? editingEvent?.timezoneDefinitions : undefined,
         recurrenceTimeZone: !repeatRuleTouched ? editingEvent?.recurrenceTimeZone : undefined,
         recurrenceValueType: !repeatRuleTouched ? editingEvent?.recurrenceValueType : undefined,
         recurrenceError: !repeatRuleTouched ? editingEvent?.recurrenceError : undefined,
@@ -552,7 +555,7 @@ export function ItemCreationModal({
                 </Text>
                 <TouchableOpacity style={styles.timeDisplayButton} onPress={() => setTimePickerTarget('start')}>
                   <Text allowFontScaling={false} style={styles.timeDisplayText}>
-                    {formatTimeOfDay(timeRange.start)} ▾
+                    {formatTimeOfDay(timeRange.start, timeFormat)} ▾
                   </Text>
                   <Text allowFontScaling={false} style={styles.timeDisplayHint}>tap to choose</Text>
                 </TouchableOpacity>
@@ -580,7 +583,7 @@ export function ItemCreationModal({
                       </TouchableOpacity>
                     </View>
                     <Text allowFontScaling={false} style={styles.durationHint}>
-                      Ends {formatTimeOfDay(timeRange.end)} · {formatDuration(timeRange.end - timeRange.start)}
+                      Ends {formatTimeOfDay(timeRange.end, timeFormat)} · {formatDuration(timeRange.end - timeRange.start)}
                     </Text>
                   </>
                 )}

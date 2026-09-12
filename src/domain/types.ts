@@ -229,6 +229,8 @@ export interface CalendarEvent {
   timeZone?: string;
   /** Zone used to expand RRULEs. UTC is explicit; undefined means floating/device-local. */
   recurrenceTimeZone?: string;
+  /** File-scoped embedded timezone definitions retained across storage and sync. */
+  timezoneDefinitions?: Record<string, string>;
   /** DTSTART value domain used to validate RRULE and exception semantics. */
   recurrenceValueType?: 'date' | 'floating' | 'utc' | 'zoned';
   /** Present when recurrence data is preserved but unsafe to expand automatically. */
@@ -282,6 +284,7 @@ export interface CalendarSettings {
   defaultViewMode: CalendarViewMode; // default: "agenda"
   /** @deprecated Retained only so older stored settings still deserialize. */
   themeMode: ProfileThemeMode;
+  timeFormat?: '12h' | '24h';
   hideAllDayEvents: boolean; // default: false
   hideSoloEvents: boolean; // default: false
   caldavEnabled?: boolean;

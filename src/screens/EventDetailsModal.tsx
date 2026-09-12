@@ -1,3 +1,5 @@
+import { formatDateTime } from '../domain/timeOfDay';
+import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarEvent } from '../domain/types';
@@ -25,13 +27,14 @@ export function EventDetailsModal({
   notePath,
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
+  const timeFormat = useTimeFormat();
   if (!event) return <></>;
   const recurrenceWarning = event.recurrenceError && event.recurrenceError.length > 240
     ? `${event.recurrenceError.slice(0, 237)}...`
     : event.recurrenceError;
   const when = event.allDay
     ? event.start.toLocaleDateString()
-    : `${event.start.toLocaleDateString()} · ${event.start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}–${event.end.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    : `${event.start.toLocaleDateString()} · ${formatDateTime(event.start, timeFormat)}–${formatDateTime(event.end, timeFormat)}`;
 
   return (
     <Modal visible transparent animationType="fade">

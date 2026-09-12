@@ -68,6 +68,7 @@ export function pushSignature(item: CalendarEvent): string {
     item.recurrenceTimeZone || '',
     item.timeZone || '',
     item.recurrenceValueType || '',
+    ...(item.timezoneDefinitions ? [item.timezoneDefinitions] : []),
     item.organizer?.name || '',
     item.organizer?.email || '',
     (item.attendees || []).map(a => [a.name || '', a.email || '', a.status || '']),

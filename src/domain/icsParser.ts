@@ -1,3 +1,4 @@
+import { canonicalTimezone, readTimezoneDefinitions, timezoneDate, timezoneFields, TimezoneDefinitions } from './calendarTimezones';
 import { Attendee, CalendarEvent } from './types';
 
 /**
@@ -32,7 +33,7 @@ export function unescapeIcsValue(val: string): string {
 /**
  * Parses ICS date strings into JS Date objects
  */
-export function parseIcsDate(datePropStr: string): { date: Date; allDay: boolean } {
+export function parseIcsDate(datePropStr: string, definitions?: TimezoneDefinitions): { date: Date; allDay: boolean } {
   let valStr = datePropStr;
   let allDay = false;
 
@@ -72,7 +73,7 @@ export function parseIcsDate(datePropStr: string): { date: Date; allDay: boolean
     }
     const tzid = datePropStr.match(/(?:^|;)TZID=([^;:]+)/i)?.[1]?.replace(/^"|"$/g, '');
     if (tzid) {
-      return { date: zonedDate(yr, mo, dy, hr, mn, sc, tzid), allDay };
+      return { date: zonedDate(yr, mo, dy, hr, mn, sc, tzid, false, definitions), allDay };
     }
     return { date: new Date(yr, mo, dy, hr, mn, sc), allDay };
   }
@@ -90,71 +91,11 @@ function zonedDate(
   minute: number,
   second: number,
   timeZone: string,
-  generated = false
+  generated = false,
+  definitions?: TimezoneDefinitions
 ): Date {
-  const desired = Date.UTC(year, month, day, hour, minute, second);
   try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    });
-
-    const representedFields = (instant: number): CalendarFields => {
-      const parts = Object.fromEntries(
-        formatter.formatToParts(new Date(instant)).map(part => [part.type, part.value])
-      );
-      return {
-        year: Number(parts.year),
-        month: Number(parts.month) - 1,
-        day: Number(parts.day),
-        hour: Number(parts.hour),
-        minute: Number(parts.minute),
-        second: Number(parts.second),
-      };
-    };
-    const offsetAt = (instant: number): number => {
-      const fields = representedFields(instant);
-      return Date.UTC(
-        fields.year, fields.month, fields.day,
-        fields.hour, fields.minute, fields.second
-      ) - instant;
-    };
-    const desiredFields: CalendarFields = { year, month, day, hour, minute, second };
-    const sameFields = (fields: CalendarFields): boolean =>
-      fields.year === desiredFields.year &&
-      fields.month === desiredFields.month &&
-      fields.day === desiredFields.day &&
-      fields.hour === desiredFields.hour &&
-      fields.minute === desiredFields.minute &&
-      fields.second === desiredFields.second;
-
-    const sampleOffsets = [...new Set([
-      offsetAt(desired - 36 * 60 * 60 * 1000),
-      offsetAt(desired - 12 * 60 * 60 * 1000),
-      offsetAt(desired),
-      offsetAt(desired + 12 * 60 * 60 * 1000),
-      offsetAt(desired + 36 * 60 * 60 * 1000),
-    ])];
-    const exactCandidates = sampleOffsets
-      .map(offset => desired - offset)
-      .filter(instant => sameFields(representedFields(instant)))
-      .sort((a, b) => a - b);
-
-    if (exactCandidates.length > 0) {
-      // RFC 5545 chooses the first occurrence when a wall time is repeated.
-      return new Date(exactCandidates[0]);
-    }
-
-    if (generated) {
-      // A recurrence-generated nonexistent local time is omitted and does not
-      // consume COUNT.
-      return new Date(Number.NaN);
-    }
-
-    // An explicitly supplied gap time uses the UTC offset immediately before
-    // the discontinuity.
-    return new Date(desired - offsetAt(desired - 36 * 60 * 60 * 1000));
+    return timezoneDate({ year, month, day, hour, minute, second }, timeZone, definitions, generated);
   } catch (_error) {
     return new Date(Number.NaN);
   }
@@ -169,7 +110,7 @@ type CalendarFields = {
   second: number;
 };
 
-function calendarFields(date: Date, timeZone?: string): CalendarFields {
+function calendarFields(date: Date, timeZone?: string, definitions?: TimezoneDefinitions): CalendarFields {
   if (!timeZone) {
     return {
       year: date.getFullYear(),
@@ -181,26 +122,7 @@ function calendarFields(date: Date, timeZone?: string): CalendarFields {
     };
   }
 
-  try {
-    const formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    });
-    const parts = Object.fromEntries(
-      formatter.formatToParts(date).map(part => [part.type, part.value])
-    );
-    return {
-      year: Number(parts.year),
-      month: Number(parts.month) - 1,
-      day: Number(parts.day),
-      hour: Number(parts.hour),
-      minute: Number(parts.minute),
-      second: Number(parts.second),
-    };
-  } catch (_error) {
-    return calendarFields(date);
-  }
+  return timezoneFields(date, timeZone, definitions);
 }
 
 function localDateKey(date: Date): string {
@@ -374,7 +296,10 @@ export function parseAttendee(line: string): Attendee {
 /**
  * Parses raw ICS content string into an array of CalendarEvents
  */
-export function parseIcsContent(icsData: string, calendarName = 'Calendar'): CalendarEvent[] {
+export function parseIcsContent(icsData: string, calendarName = 'Calendar', diagnostics: string[] = []): CalendarEvent[] {
+  let definitions: TimezoneDefinitions;
+  try { definitions = readTimezoneDefinitions(icsData); }
+  catch (error) { diagnostics.push(String(error)); return []; }
   const lines = unfoldIcsContent(icsData);
   const events: ParsedCalendarEvent[] = [];
 
@@ -418,6 +343,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
         }
         const end = currentEvent.end || defaultEnd;
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+          diagnostics.push(`Event ${uid.slice(0, 80)} has an invalid date or unsupported timezone${currentEvent.recurrenceTimeZone ? `: ${currentEvent.recurrenceTimeZone.slice(0, 80)}` : ''}.`);
           inEvent = false;
           currentEvent = {};
           continue;
@@ -455,6 +381,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
           recurrenceTimeZone: currentEvent.recurrenceTimeZone,
           recurrenceValueType,
           recurrenceError,
+          timezoneDefinitions: Object.keys(definitions).length ? definitions : undefined,
           // Kept internal until overrides are folded into their master below.
           ...(currentEvent.cancelled ? { cancelled: true } : {}),
           ...(currentEvent.recurrenceIdAllDay !== undefined
@@ -507,12 +434,12 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
         break;
       case 'DTSTART':
       case 'DUE': {
-        const { date, allDay } = parseIcsDate(trimmed);
+        const { date, allDay } = parseIcsDate(trimmed, definitions);
         const tzid = propNameAndParams.match(/(?:^|;)TZID=([^;:]+)/i)?.[1]?.replace(/^"|"$/g, '');
         const isUtc = /Z$/i.test(propVal.trim());
         currentEvent.start = date;
         currentEvent.allDay = allDay;
-        currentEvent.timeZone = tzid;
+        currentEvent.timeZone = tzid ? canonicalTimezone(tzid) : undefined;
         currentEvent.recurrenceTimeZone = tzid || (isUtc ? 'UTC' : undefined);
         currentEvent.recurrenceValueType = allDay ? 'date' : tzid ? 'zoned' : isUtc ? 'utc' : 'floating';
         if (allDay && tzid) currentEvent.recurrenceError = 'TZID is invalid on DATE DTSTART';
@@ -520,7 +447,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
         break;
       }
       case 'DTEND': {
-        const { date } = parseIcsDate(trimmed);
+        const { date } = parseIcsDate(trimmed, definitions);
         currentEvent.end = date;
         break;
       }
@@ -549,7 +476,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
       case 'EXDATE': {
         const parsedDates = propVal
           .split(',')
-          .map(value => parseIcsDate(`${propNameAndParams}:${value}`))
+          .map(value => parseIcsDate(`${propNameAndParams}:${value}`, definitions))
           .filter(parsed => !Number.isNaN(parsed.date.getTime()));
         currentEvent.exceptionDates = [
           ...(currentEvent.exceptionDates || []),
@@ -562,7 +489,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar'): Cal
         break;
       }
       case 'RECURRENCE-ID': {
-        const recurrenceId = parseIcsDate(trimmed);
+        const recurrenceId = parseIcsDate(trimmed, definitions);
         currentEvent.recurrenceId = recurrenceId.date;
         currentEvent.recurrenceIdAllDay = recurrenceId.allDay;
         break;
@@ -713,7 +640,7 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
 
   const weekday = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
   const recurrenceTimeZone = event.recurrenceTimeZone ?? event.timeZone;
-  const original = calendarFields(origStart, recurrenceTimeZone);
+  const original = calendarFields(origStart, recurrenceTimeZone, event.timezoneDefinitions);
   const startDay = new Date(Date.UTC(original.year, original.month, original.day));
 
   // RFC 5545 counts weekly intervals in whole calendar weeks that begin on
@@ -795,7 +722,7 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
       : recurrenceTimeZone
         ? recurrenceTimeZone === 'UTC'
           ? new Date(Date.UTC(year, month, day, original.hour, original.minute, original.second))
-          : zonedDate(year, month, day, original.hour, original.minute, original.second, recurrenceTimeZone, true)
+          : zonedDate(year, month, day, original.hour, original.minute, original.second, recurrenceTimeZone, true, event.timezoneDefinitions)
         : new Date(year, month, day, original.hour, original.minute, original.second);
     const candidateIsValid = !Number.isNaN(candidate.getTime());
     if (candidateIsValid && candidate > rangeEnd) break;
@@ -871,4 +798,12 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
   }
 
   return instances;
+}
+
+/** Import/sync callers must not treat rejected items as authoritative deletions. */
+export function parseIcsContentStrict(content: string, name = 'Calendar'): CalendarEvent[] {
+  const diagnostics: string[] = [];
+  const events = parseIcsContent(content, name, diagnostics);
+  if (diagnostics.length) throw new Error(`Calendar import needs attention: ${diagnostics[0]} (${diagnostics.length} issue(s)).`);
+  return events;
 }
