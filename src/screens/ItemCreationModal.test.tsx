@@ -23,6 +23,18 @@ test.each(['task', 'event'] as const)('new %s holds a selected note until Save',
   act(() => tree!.unmount());
 });
 
+test.each(['task', 'event'] as const)('saving a new %s records it before the form closes', type => {
+  // Quick Add closes SNFolio from onClose, so the item must already be stored by then.
+  const order: string[] = [];
+  const createTask = jest.fn(() => order.push('create')), createEvent = jest.fn(() => order.push('create')), close = jest.fn(() => order.push('close'));
+  let tree: TestRenderer.ReactTestRenderer;
+  act(() => { tree = TestRenderer.create(<ItemCreationModal visible type={type} targetDate={new Date(2026, 8, 12)} initialTitle="Quick item" availableFeeds={[]} onClose={close} onCreateTask={createTask} onCreateEvent={createEvent} />); });
+  const save = tree!.root.findAllByType(TouchableOpacity).reverse().find(node => node.findAllByType(Text).some(text => [text.props.children].flat().join('').includes('💾 Save')));
+  act(() => save!.props.onPress());
+  expect(order).toEqual(['create', 'close']);
+  act(() => tree!.unmount());
+});
+
 test('canceling a new item discards the pending note link', async () => {
   (pickLinkedNote as jest.Mock).mockResolvedValue('/Note/Existing.note');
   const createTask = jest.fn(), createEvent = jest.fn(), close = jest.fn();

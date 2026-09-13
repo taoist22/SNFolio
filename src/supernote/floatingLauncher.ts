@@ -55,13 +55,16 @@ export function startFloatingLauncher(): void {
   void native?.hide();
   DeviceEventEmitter.addListener('FolioLauncherTap', async (action: string) => {
     try {
-      if (foreground && action !== 'quick') {
+      if (foreground) {
+        // Inside SNFolio the icon only offers Recent Files; Quick Add is for
+        // capturing from an open note or document.
+        if (action === 'quick') return;
         await captureCurrentNote();
         recentHandler?.();
         return;
       }
-      if (!foreground) await captureCurrentNote();
-      const opened = foreground ? true : await PluginManager.showPluginView();
+      await captureCurrentNote();
+      const opened = await PluginManager.showPluginView();
       if (opened === false) return;
       if (action === 'quick') {
         if (quickHandler) quickHandler();

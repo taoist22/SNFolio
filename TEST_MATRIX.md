@@ -185,3 +185,42 @@ Final checks: 635 tests / 43 suites pass; TypeScript passes; lint has zero error
 The maintainer accepted build 59 (“This is good”) and authorized README updates, commit, push, and release. Build 60 promotes the same application code with final version metadata and documentation.
 
 Final validation: 651 tests / 48 suites pass; typecheck passes; lint has zero errors (611 warnings); clean native build and package validation pass for 0.1.22/build 60, including native launcher code.
+
+## Build 61 — 0.1.23-rc.1 floating icon behaviour and startup persistence
+
+Built from release 0.1.22 (18140f4). Earlier uncommitted builds 61–67 (navigation diagnostics and host hide/reshow experiments) were discarded.
+
+- Floating icon inside SNFolio: tap opens the picker; long press does nothing. From an open note, PDF, or EPUB: tap reopens SNFolio; long press opens Quick Add, and Save Task / Save Event / Close store the item first and then return to the file.
+- Recent Notes is now Recent Files: remembers up to 12 .note, .pdf, and .epub paths. Notes open in the note editor; PDFs and EPUBs open through the document opener. Browse Files… opens the native picker at storage root and opens any chosen file, adding notes, PDFs, and EPUBs to Recent Files.
+- Startup persistence protection restored: Recent Files capture and writes are skipped until calendarStorage.isLoaded(), so a launcher-triggered settings save cannot write empty collections over stored data.
+- Fixed a pre-existing test type error (MeetingNoteMapping.seriesId) that failed typecheck on 0.1.22.
+- 655 tests / 48 suites pass (new: long press ignored in foreground and Quick Add from a file; save stores before closing for tasks and events; PDF/EPUB recent files; no pre-hydration writes). Typecheck passes; lint has zero errors (615 warnings). Clean build and package validation pass for 0.1.23-rc.1/build 61.
+- Not confirmed: whether PluginCommAPI.getCurrentFilePath returns the PDF/EPUB path in the DOC app. If not, documents opened outside SNFolio will not enter Recent Files.
+- Device checks: (1) inside SNFolio, tap icon → Recent Files; long press → nothing. (2) In a note: tap → SNFolio opens; long press → Quick Add → Save Task, then Save Event, then Close; each returns to the note and saved items appear in SNFolio. (3) Same from a PDF and an EPUB, and check the document appears in Recent Files. (4) Recent Files → open a note, a PDF, an EPUB. (5) Browse Files… → open a file; cancel the picker. (6) Existing tasks/events survive exit, restart, and reopening via the icon.
+
+## Build 62 — 0.1.23-rc.2 Browse Files steps aside first
+
+- Build 61 device result: checks 1–4 passed (icon tap/long press in SNFolio and from a note, Quick Add Save Task / Save Event / Close). Browse Files… did nothing after SNFolio had been reopened from the icon — the picker opened behind the panel, as previously observed after a showPluginView reopen.
+- Browse Files… now clears note lasso state, minimizes SNFolio (icon kept), waits 200 ms, then opens the native picker. Picking a file opens it with SNFolio closed. Cancelling the picker, or a failed open, reopens SNFolio via restoreFolio().
+- 656 tests / 48 suites pass (new: restoreFolio reopen and refused reopen). Typecheck passes; lint has zero errors (618 warnings). Clean build and package validation pass for 0.1.23-rc.2/build 62; restoreFolio confirmed in bundle.
+- Device checks: after reopening SNFolio from the icon, Browse Files… → picker visible → open a note, then a PDF; repeat and cancel → SNFolio returns to the same view. Then finish build 61 checks 5–7.
+
+## Build 63 — 0.1.23-rc.3 in-panel file browser
+
+- Build 62 device result: Browse Files was unreliable — sometimes SNFolio stayed on screen, sometimes Open File returned to SNFolio instead of the chosen file, and sometimes a pick dropped back to SNFolio rather than the note. The native picker path (RattaFileSelector) is abandoned.
+- Browse Files… now opens FileBrowserModal inside SNFolio, following sn-lastnote's in-panel browser: Internal/SD roots, ↑ Up, folders and files listed through the existing native listFolderEntries. Tapping a file opens it through the same open-then-close path as Recent Files; a failed open is shown in the browser, which stays open. restoreFolio() removed.
+- 657 tests / 49 suites pass (new: folder navigation, file handoff, Up; failed open reported). Typecheck passes; lint has zero errors (622 warnings). Clean build and package validation pass for 0.1.23-rc.3/build 63.
+- Device checks: after reopening SNFolio from the icon, icon → Browse Files… → navigate folders, Up, SD root if present → open a note, then a PDF, then an EPUB; each should come to the front with SNFolio closed. Cancel returns to SNFolio. Repeat several times. Then finish build 61 checks 5–7.
+
+## Build 64 — 0.1.23-rc.4 two-column Recent Files
+
+- Build 63 device result: maintainer reported everything working, including the in-panel file browser.
+- Recent Files card shows files as two half-width tiles per row, filled across rows (newest top-left). Each tile shows the file name on one line and its folder on a second, both truncated. Browse Files… (left) and Cancel (right) share a bottom row outside the scrolling list, at equal height. Limit remains 12 files.
+- Layout-only change with no new tests. 657 tests / 49 suites pass; typecheck passes; lint has zero errors (622 warnings). Clean build and package validation pass for 0.1.23-rc.4/build 64.
+- Device checks on Manta and Nomad: tiles in two columns in newest-first row order, long names truncate without wrapping, empty state spans the card, buttons side by side and reachable with a full list of 12, tapping a tile / Browse / Cancel behave as in build 63.
+
+## Release 0.1.23 / build 65
+
+The maintainer accepted build 64 ("works") and authorized README updates, commit, and release. Build 65 promotes the same application code with final version metadata and documentation.
+
+Final validation: 657 tests / 49 suites pass; typecheck passes; lint has zero errors (622 warnings); clean native build and package validation pass for 0.1.23/build 65, including app.npk.

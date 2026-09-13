@@ -63,5 +63,19 @@ test('single tap chooses notes in the foreground and reopens the plugin in the b
   await tap('open');
   expect(PluginManager.showPluginView).toHaveBeenCalledTimes(1);
   expect(recent).toHaveBeenCalledTimes(1);
-  unregister(); stateSpy.mockRestore(); eventSpy.mockRestore();
+
+  // Long press: nothing while SNFolio is on screen; Quick Add from a note or document.
+  const quick = jest.fn();
+  const unregisterQuick = launcher.registerQuickAdd(quick);
+  (PluginManager.showPluginView as jest.Mock).mockClear();
+  changeState('active');
+  await tap('quick');
+  expect(quick).not.toHaveBeenCalled();
+  expect(recent).toHaveBeenCalledTimes(1);
+  expect(PluginManager.showPluginView).not.toHaveBeenCalled();
+  changeState('background');
+  await tap('quick');
+  expect(PluginManager.showPluginView).toHaveBeenCalledTimes(1);
+  expect(quick).toHaveBeenCalledTimes(1);
+  unregisterQuick(); unregister(); stateSpy.mockRestore(); eventSpy.mockRestore();
 });

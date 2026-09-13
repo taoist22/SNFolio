@@ -97,6 +97,7 @@ import { dailyFocusTasks, plannerWeekRange, projectsNeedingAttention } from '../
 import { WeeklyReviewView } from './WeeklyReviewView';
 import { CalendarWeekView } from './CalendarWeekView';
 import { FolderPickerModal } from './FolderPickerModal';
+import { FileBrowserModal } from './FileBrowserModal';
 import { CreateEventNoteModal, EventNoteChoice, LinkedNoteKind } from './CreateEventNoteModal';
 import { ExistingParaFoldersModal } from './ExistingParaFoldersModal';
 import {
@@ -234,6 +235,7 @@ export function AgendaScreen(): React.JSX.Element {
   const [showAppMenu, setShowAppMenu] = useState<boolean>(false);
   const [showDateActionSheet, setShowDateActionSheet] = useState<boolean>(false);
   const [recentNotesVisible, setRecentNotesVisible] = useState(false);
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [recentNotes, setRecentNotes] = useState<string[]>([]);
   useEffect(() => registerRecentNotes(() => {
     setRecentNotes(calendarStorage.getSettings().recentNotePaths || []);
@@ -3742,6 +3744,36 @@ export function AgendaScreen(): React.JSX.Element {
     }
   };
 
+  /** Recent Files entry: notes keep the note opener; PDFs and EPUBs use the document opener. */
+  const handleOpenRecentFile = async (path: string) => {
+    if (path.toLowerCase().endsWith('.note')) {
+      await handleOpenExistingNote(path);
+      return;
+    }
+    await prepareForNativeFileOpen();
+    const opened = await openResourceFile(path);
+    setStatusMsg(opened.message);
+    if (opened.success) {
+      rememberNote(path);
+      setRecentNotesVisible(false);
+      closePanel();
+    }
+  };
+
+  /**
+   * A file chosen in the in-panel browser opens exactly like a Recent Files
+   * entry: launch it, then close SNFolio so it comes to the front.
+   */
+  const handleOpenBrowsedFile = async (path: string) => {
+    await prepareForNativeFileOpen();
+    const opened = await openResourceFile(path);
+    if (!opened.success) throw new Error(opened.message);
+    setStatusMsg(opened.message);
+    rememberNote(path); // Only notes, PDFs, and EPUBs are kept.
+    setShowFileBrowser(false);
+    closePanel();
+  };
+
   const handleFetchFeedUrl = async () => {
     const draftUrl = (newFeedInputRef.current?.getValue() ?? newFeedUrl).trim();
     if (!draftUrl) return;
@@ -5037,7 +5069,7 @@ export function AgendaScreen(): React.JSX.Element {
             if (!enabled) void removeFloatingIcon();
             else void showFloatingIcon().catch(error => setStatusMsg(String(error?.message || error)));
           }} />
-          <Text allowFontScaling={false} style={styles.bodyText}>Use Minimize to return to your note. Tap the icon in a note to reopen SNFolio, or inside SNFolio for Recent Notes. Hold for Quick Add, or drag to move it. Exit removes the icon.</Text>
+          <Text allowFontScaling={false} style={styles.bodyText}>Use Minimize to return to your note. Tap the icon in a note or document to reopen SNFolio, or hold it there for Quick Add. Inside SNFolio, tap it for Recent Files and Browse Files. Drag to move it. Exit removes the icon.</Text>
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Event Types</Text>
           <Text allowFontScaling={false} style={styles.bodyText}>
             What kinds of event you have — Class, Work, Personal. Each carries where its notes are
@@ -5516,24 +5548,37 @@ export function AgendaScreen(): React.JSX.Element {
           <Modal visible={recentNotesVisible} transparent animationType="none" onRequestClose={() => setRecentNotesVisible(false)}>
             <View style={styles.recentNotesOverlay}>
               <View style={styles.recentNotesCard}>
-                <Text allowFontScaling={false} style={styles.sectionTitle}>Recent Notes</Text>
-                <Text allowFontScaling={false} style={styles.bodyText}>Notes visited through SNFolio or open when you returned to it.</Text>
-                <ScrollView style={styles.recentNotesList}>
-                  {recentNotes.length === 0 && <Text allowFontScaling={false} style={styles.bodyText}>No recent notes yet. Open a note and return to SNFolio to add it here.</Text>}
-                  {recentNotes.map(path => <TouchableOpacity key={path} style={styles.actionSheetBtn} onPress={() => {
+                <Text allowFontScaling={false} style={styles.sectionTitle}>Recent Files</Text>
+                <Text allowFontScaling={false} style={styles.bodyText}>Notes, PDFs, and EPUBs visited through SNFolio or open when you returned to it.</Text>
+                {/* Two columns, filled across rows so the newest files stay on top. */}
+                <ScrollView style={styles.recentNotesList} contentContainerStyle={styles.recentFilesGrid}>
+                  {recentNotes.length === 0 && <Text allowFontScaling={false} style={[styles.bodyText, styles.recentFilesEmpty]}>No recent files yet. Open a note or document and return to SNFolio to add it here.</Text>}
+                  {recentNotes.map(path => <TouchableOpacity key={path} style={[styles.actionSheetBtn, styles.recentFileTile]} onPress={() => {
                     setRecentNotesVisible(false);
-                    void handleOpenExistingNote(path);
+                    void handleOpenRecentFile(path);
                   }}>
-                    <Text allowFontScaling={false} style={styles.actionSheetBtnText}>{path.split('/').pop()?.replace(/\.note$/i, '')}</Text>
-                    <Text allowFontScaling={false} style={styles.bodyText} numberOfLines={1}>{path}</Text>
+                    <Text allowFontScaling={false} style={styles.actionSheetBtnText} numberOfLines={1}>{path.split('/').pop()?.replace(/\.note$/i, '')}</Text>
+                    <Text allowFontScaling={false} style={styles.bodyText} numberOfLines={1}>{path.split('/').slice(0, -1).join('/')}</Text>
                   </TouchableOpacity>)}
                 </ScrollView>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setRecentNotesVisible(false)}>
-                  <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
+                <View style={styles.recentFilesActions}>
+                  <TouchableOpacity style={[styles.actionSheetBtn, styles.recentFilesAction]} onPress={() => { setRecentNotesVisible(false); setShowFileBrowser(true); }}>
+                    <Text allowFontScaling={false} style={styles.actionSheetBtnText}>📂 Browse Files…</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.cancelBtn, styles.recentFilesAction]} onPress={() => setRecentNotesVisible(false)}>
+                    <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </Modal>
+
+          <FileBrowserModal
+            visible={showFileBrowser}
+            initialPath="/storage/emulated/0"
+            onCancel={() => setShowFileBrowser(false)}
+            onOpenFile={handleOpenBrowsedFile}
+          />
 
           <ItemCreationModal
             visible={showItemCreationModal}
@@ -6102,6 +6147,12 @@ const styles = StyleSheet.create({
   recentNotesOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   recentNotesCard: { width: '85%', maxHeight: '80%', padding: 16, borderWidth: 2, borderColor: '#000', backgroundColor: '#fff' },
   recentNotesList: { flexShrink: 1, marginVertical: 10 },
+  recentFilesGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  recentFilesEmpty: { width: '100%' },
+  recentFileTile: { width: '48.5%', paddingHorizontal: 8 },
+  recentFilesActions: { flexDirection: 'row', justifyContent: 'space-between' },
+  // Same height for both buttons, whatever their border and padding.
+  recentFilesAction: { width: '48.5%', minHeight: 44, justifyContent: 'center', marginBottom: 0 },
   root: {
     flex: 1,
     backgroundColor: '#ffffff',

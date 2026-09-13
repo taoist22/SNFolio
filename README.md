@@ -132,18 +132,19 @@ Under **Calendars & Sync**:
 
 For all three controls, the selected choice has a **black background with white text**; the other choice has a white background and black outline.
 
-### Floating Icon and Recent Notes
+### Floating Icon and Recent Files
 
 On **Manta and Nomad**, enable **Floating SNFolio icon** under **⚙ → Connections & Settings → App & View**. It is off by default.
 
 - **Minimize** in the ⚙ menu returns to your note and leaves the floating **SN** icon available.
-- **Tap the icon while viewing a note** to reopen SNFolio at its previous section and date.
-- **Tap the icon inside SNFolio** to choose from **Recent Notes** and return to a note.
-- **Hold and release** the icon for **Quick Add**, using the event/task form. Saving or canceling minimizes SNFolio again.
+- **Tap the icon while viewing a note, PDF, or EPUB** to reopen SNFolio at its previous section and date.
+- **Hold and release the icon while viewing a note, PDF, or EPUB** for **Quick Add**, using the event/task form. Saving or closing the form returns you to that file.
+- **Tap the icon inside SNFolio** to choose from **Recent Files** and return to a note or document. Holding the icon inside SNFolio does nothing.
+- **Browse Files…** at the bottom left of Recent Files opens a file browser inside SNFolio. Choose **Internal** or an SD card, open folders, use **↑ Up** to go back, and tap a file to open it. **Cancel** returns to SNFolio.
 - **Drag** the icon to move it; its position is remembered.
 - **Exit SNFolio**, closing through the toolbar, or turning the setting off removes the icon.
 
-Recent Notes remembers up to 12 notes opened through SNFolio or open when you return to it. It is saved across restarts; it does not scan your library or represent every note open on the device.
+Recent Files shows up to 12 notes, PDFs, and EPUBs in two columns, newest first, reading across each row. Each entry shows the file name and its folder. The list includes files opened through SNFolio or open when you return to it. It is saved across restarts; it does not scan your library or represent every file open on the device.
 
 ### PARA Workspace
 
