@@ -1,11 +1,13 @@
+import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarTask, Project } from '../domain/types';
 import { projectDisplayLabel } from '../domain/projectLabel';
 import { projectsNeedingAttention, weeklyTaskSummary } from '../domain/plannerReview';
 import { projectProgress } from '../domain/taskListView';
 
 interface WeeklyReviewViewProps {
+  isNomad?: boolean;
   selectedDate: Date;
   weekStartsOn: number;
   tasks: CalendarTask[];
@@ -25,6 +27,7 @@ function blocks(percent: number): string {
 }
 
 export function WeeklyReviewView({
+  isNomad = false,
   selectedDate,
   weekStartsOn,
   tasks,
@@ -43,8 +46,7 @@ export function WeeklyReviewView({
     (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0)
   );
 
-  return (
-    <ScrollView style={styles.root} keyboardShouldPersistTaps="handled">
+  const header = (<>
       <View style={styles.noteCard}>
         <View style={styles.noteCopy}>
           <Text allowFontScaling={false} style={styles.noteTitle}>📝 Weekly Review Note</Text>
@@ -68,9 +70,13 @@ export function WeeklyReviewView({
         <View style={[styles.metric, styles.metricLast]}><Text allowFontScaling={false} style={styles.metricValue}>{summary.overdue.length}</Text><Text allowFontScaling={false} style={styles.metricLabel}>Overdue now</Text></View>
       </View>
 
-      <View style={styles.sectionHeader}>
+  </>);
+  return (
+    <DayPlannerSections enabled={isNomad} weekly header={header}>
+      <PlannerSection id="projects" title="Project Check-In" summary={`${attention.length} project(s)`}>
+      {!isNomad && (<View style={styles.sectionHeader}>
         <Text allowFontScaling={false} style={styles.sectionHeaderText}>PROJECT CHECK-IN</Text>
-      </View>
+      </View>)}
       {attention.length === 0 ? (
         <Text allowFontScaling={false} style={styles.empty}>No projects need attention this week.</Text>
       ) : attention.map(project => {
@@ -95,9 +101,11 @@ export function WeeklyReviewView({
         );
       })}
 
-      <View style={styles.sectionHeader}>
+      </PlannerSection>
+      <PlannerSection id="deadlines" title="Upcoming Deadlines" summary={`${deadlines.length} open deadline(s)`}>
+      {!isNomad && (<View style={styles.sectionHeader}>
         <Text allowFontScaling={false} style={styles.sectionHeaderText}>UPCOMING DEADLINES</Text>
-      </View>
+      </View>)}
       {deadlines.length === 0 ? (
         <Text allowFontScaling={false} style={styles.empty}>No open tasks are due this week.</Text>
       ) : deadlines.map(task => {
@@ -115,9 +123,11 @@ export function WeeklyReviewView({
         );
       })}
 
-      <View style={styles.sectionHeader}>
+      </PlannerSection>
+      <PlannerSection id="journal" title="Daily Journal Notes" summary={`${journalDates.length} journal note(s)`}>
+      {!isNomad && (<View style={styles.sectionHeader}>
         <Text allowFontScaling={false} style={styles.sectionHeaderText}>DAILY JOURNAL NOTES</Text>
-      </View>
+      </View>)}
       {journalDates.length === 0 ? (
         <Text allowFontScaling={false} style={styles.empty}>No daily journal notes found for this week.</Text>
       ) : journalDates.map(date => (
@@ -129,7 +139,8 @@ export function WeeklyReviewView({
           <Text allowFontScaling={false} style={styles.openText}>Open ›</Text>
         </TouchableOpacity>
       ))}
-    </ScrollView>
+      </PlannerSection>
+    </DayPlannerSections>
   );
 }
 

@@ -1,3 +1,7 @@
+import { pickLinkedNote } from '../supernote/pickLinkedNote';
+import { captureCurrentNote, rememberNote } from '../supernote/recentNotes';
+import { exitFolio, minimizeFolio, removeFloatingIcon, registerQuickAdd, registerRecentNotes, showFloatingIcon, handleToolbarLauncher } from '../supernote/floatingLauncher';
+import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import { SettingChoice } from './SettingChoice';
 import { TimeFormatContext } from './TimeFormatContext';
 import { TimeFormat, formatDateTime } from '../domain/timeOfDay';
@@ -13,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { PluginManager, FileUtils, PluginCommAPI, PluginFileAPI, RattaFileSelector } from 'sn-plugin-lib';
+import { PluginManager, FileUtils, PluginCommAPI, RattaFileSelector } from 'sn-plugin-lib';
 import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingTextInput';
 import {
   Area,
@@ -77,7 +81,7 @@ import {
   taskSourceCollection,
   taskToCaldavItem,
 } from '../domain/taskSync';
-import { LASSO_BUTTON_ID, LASSO_PRESS_EVENT } from '../domain/buttonIds';
+import { TOOLBAR_BUTTON_ID, LASSO_BUTTON_ID, LASSO_PRESS_EVENT } from '../domain/buttonIds';
 import { parseCapturedText, resolveDateOrder, ParsedCapture } from '../domain/captureParser';
 import { captureLassoText } from '../supernote/lassoCapture';
 import { MonthGridView } from './MonthGridView';
@@ -229,6 +233,20 @@ export function AgendaScreen(): React.JSX.Element {
   const [showCalendarMenu, setShowCalendarMenu] = useState<boolean>(false);
   const [showAppMenu, setShowAppMenu] = useState<boolean>(false);
   const [showDateActionSheet, setShowDateActionSheet] = useState<boolean>(false);
+  const [recentNotesVisible, setRecentNotesVisible] = useState(false);
+  const [recentNotes, setRecentNotes] = useState<string[]>([]);
+  useEffect(() => registerRecentNotes(() => {
+    setRecentNotes(calendarStorage.getSettings().recentNotePaths || []);
+    setRecentNotesVisible(true);
+  }), []);
+  const [floatingEnabled, setFloatingEnabled] = useState(false);
+  const quickAddActive = useRef(false);
+  useEffect(() => registerQuickAdd(() => {
+    quickAddActive.current = true;
+    setEditingEvent(null); setEditingTask(null);
+    setLassoDraftTitle(''); setLassoDraftParsed(null); setLassoDraftDate(new Date());
+    setPendingProjectId(undefined); setCreationType('task'); setShowItemCreationModal(true);
+  }), []);
   const [showItemCreationModal, setShowItemCreationModal] = useState<boolean>(false);
   const [creationType, setCreationType] = useState<'event' | 'task'>('event');
 
@@ -371,6 +389,9 @@ export function AgendaScreen(): React.JSX.Element {
     if (cancelled) return;
 
     const settings = calendarStorage.getSettings();
+    setFloatingEnabled(Boolean(settings.floatingLauncherEnabled));
+    await captureCurrentNote();
+    void showFloatingIcon().catch(error => setStatusMsg(String(error?.message || error)));
     if (settings.taskCaldavCollectionUrl && !settings.taskCaldavLocalEnrollmentDone) {
       calendarStorage.excludeDeviceOnlyTasksFromSync();
       calendarStorage.updateSettings({ taskCaldavLocalEnrollmentDone: true });
@@ -439,6 +460,11 @@ export function AgendaScreen(): React.JSX.Element {
       if (PluginManager && PluginManager.registerButtonListener) {
         PluginManager.registerButtonListener({
           onButtonPress: async (msg: any) => {
+            if (msg?.id === TOOLBAR_BUTTON_ID) {
+              quickAddActive.current = false;
+              await handleToolbarLauncher();
+              return;
+            }
             // The SDK sends { id, name, icon, pressEvent }. The previous guard
             // tested msg.action and msg.buttonId — neither field exists, so it
             // returned on every press and the handler never ran.
@@ -574,7 +600,7 @@ export function AgendaScreen(): React.JSX.Element {
 
   const handleClosePlugin = () => {
     try {
-      PluginManager.closePluginView();
+      void exitFolio();
     } catch (e) {}
   };
 
@@ -1935,6 +1961,15 @@ export function AgendaScreen(): React.JSX.Element {
   };
 
   const isWideScreen = Dimensions.get('window').width >= 800;
+  const [isNomad, setIsNomad] = useState(false);
+  useEffect(() => {
+    let active = true;
+    PluginManager.getDeviceType().then(type => {
+      if (active) setIsNomad(type === 4);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
   const connectedCalendarFeeds = calendarFeeds.filter(feed =>
     (feed.url || feed.localPath) &&
     !feed.id.startsWith('default-') &&
@@ -2732,11 +2767,13 @@ export function AgendaScreen(): React.JSX.Element {
     targetFeedId: string,
     typeId?: string,
     projectId?: string,
-    areaId?: string
+    areaId?: string,
+    linkedNotePath?: string
   ) => {
     // Stored beside the event rather than on it: a sync rebuilds the event
     // object from ICS, and anything held on it would be lost.
     const identity = noteIdentity(newEvent);
+    if (linkedNotePath) saveNoteLink(identity, linkedNotePath);
     // A Project owns its Area. Without a Project, an explicit Area wins over
     // the Event Type's default; leaving it blank continues to follow the type.
     calendarStorage.setMembership(identity, { typeId, projectId, areaId: projectId ? undefined : areaId });
@@ -3322,54 +3359,31 @@ export function AgendaScreen(): React.JSX.Element {
     setTaskNoteCreationTarget(task);
   };
 
+  const saveNoteLink = (identity: string, path: string) => {
+    calendarStorage.setMapping({ eventUid: identity, seriesId: identity, notePath: path, lastPageNum: 1, lastCreatedIso: new Date().toISOString() });
+    setMembershipRevision(value => value + 1);
+  };
+  const closeNoteDialogs = () => {
+    setTaskNoteCreationTarget(null); setShowItemCreationModal(false);
+    setShowTaskList(false); setDetailEvent(null);
+  };
+  const linkExistingNote = async (identity: string) => {
+    closeNoteDialogs();
+    try {
+      const path = await pickLinkedNote();
+      if (path) { saveNoteLink(identity, path); setStatusMsg(`Linked ${path.split('/').pop()}.`); }
+      else setStatusMsg('Note linking canceled.');
+    } catch (error: any) { setStatusMsg(error?.message || 'Could not link note.'); }
+  };
+  const unlinkExistingNote = (identity: string) => {
+    calendarStorage.unlinkMapping(identity);
+    setMembershipRevision(value => value + 1);
+    closeNoteDialogs();
+    setStatusMsg('Note unlinked. The note file is unchanged.');
+  };
   const handleLinkExistingTaskNote = async (selectedTask?: CalendarTask) => {
     const task = selectedTask || taskNoteCreationTarget;
-    if (!task) return;
-    if (!RattaFileSelector?.selectFile) {
-      setStatusMsg('Native file picker unavailable on this device.');
-      return;
-    }
-    setTaskNoteCreationTarget(null);
-    setShowItemCreationModal(false);
-    setShowTaskList(false);
-    try {
-      const result = await RattaFileSelector.selectFile({
-        selectType: 0,
-        maxNum: 1,
-        title: 'Select a note to link to this task',
-        rightButtonText: 'Link Note',
-        needSelectFolder: '/storage/emulated/0/Note',
-        suffixList: ['note'],
-      });
-      const notePath = firstPickedFilePath(result);
-      if (!notePath) {
-        setTaskNoteCreationTarget(task);
-        return;
-      }
-      if (!/\.note$/i.test(notePath)) {
-        setStatusMsg('Choose a Supernote .note file.');
-        setTaskNoteCreationTarget(task);
-        return;
-      }
-      const note: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
-      if (!note?.success || typeof note.data !== 'number' || note.data < 1) {
-        setStatusMsg('Could not read the selected note.');
-        setTaskNoteCreationTarget(task);
-        return;
-      }
-      calendarStorage.setMapping({
-        eventUid: task.uid,
-        seriesId: task.uid,
-        notePath,
-        lastPageNum: note.data,
-        lastCreatedIso: new Date().toISOString(),
-      });
-      setMembershipRevision(value => value + 1);
-      setStatusMsg(`Linked ${notePath.split('/').pop()} to "${task.title}".`);
-    } catch (error: any) {
-      setStatusMsg(`Could not link note: ${error?.message || 'Picker closed'}`);
-      setTaskNoteCreationTarget(task);
-    }
+    if (task) await linkExistingNote(task.uid);
   };
 
   const handleConfirmTaskNote = async (kind: LinkedNoteKind, folder: string, name: string) => {
@@ -3619,6 +3633,7 @@ export function AgendaScreen(): React.JSX.Element {
   };
 
   const handleCreateNewTask = (input: {
+    linkedNotePath?: string;
     uid?: string;
     title: string;
     dueDate?: Date;
@@ -3653,6 +3668,7 @@ export function AgendaScreen(): React.JSX.Element {
     const withState = withStatus(task, input.status || taskStatus(task));
 
     calendarStorage.upsertTask(withState);
+    if (input.linkedNotePath) saveNoteLink(withState.uid, input.linkedNotePath);
     // Membership is stored beside the task, not on it, so that one mechanism
     // serves events and notes too and survives a sync rebuilding them.
     calendarStorage.setMembership(withState.uid, {
@@ -3684,9 +3700,7 @@ export function AgendaScreen(): React.JSX.Element {
    * looks like the tap did nothing.
    */
   const closePanel = () => {
-    try {
-      PluginManager.closePluginView();
-    } catch (e) {}
+    void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
   };
 
   /**
@@ -3721,7 +3735,11 @@ export function AgendaScreen(): React.JSX.Element {
     await prepareForNativeFileOpen();
     const res = await openNoteInEditor(notePath);
     setStatusMsg(res.message);
-    if (res.success) closePanel();
+    if (res.success) {
+      rememberNote(notePath);
+      setRecentNotesVisible(false);
+      closePanel();
+    }
   };
 
   const handleFetchFeedUrl = async () => {
@@ -3954,6 +3972,12 @@ export function AgendaScreen(): React.JSX.Element {
                 ⚙ {showSettings ? 'Close Settings' : 'Connections & Settings'}
               </Text>
             </TouchableOpacity>
+            {floatingEnabled && <TouchableOpacity style={styles.actionSheetBtn} onPress={() => {
+              setShowAppMenu(false);
+              void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
+            }}>
+              <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Minimize</Text>
+            </TouchableOpacity>}
             <TouchableOpacity style={styles.deleteOptionBtnDanger} onPress={() => {
               setShowAppMenu(false);
               handleClosePlugin();
@@ -5007,6 +5031,13 @@ export function AgendaScreen(): React.JSX.Element {
 
           {settingsTab === 'app' && (
             <>
+          <SettingChoice label="Floating SNFolio icon" value={floatingEnabled} onChange={enabled => {
+            setFloatingEnabled(enabled);
+            calendarStorage.updateSettings({ floatingLauncherEnabled: enabled });
+            if (!enabled) void removeFloatingIcon();
+            else void showFloatingIcon().catch(error => setStatusMsg(String(error?.message || error)));
+          }} />
+          <Text allowFontScaling={false} style={styles.bodyText}>Use Minimize to return to your note. Tap the icon in a note to reopen SNFolio, or inside SNFolio for Recent Notes. Hold for Quick Add, or drag to move it. Exit removes the icon.</Text>
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Event Types</Text>
           <Text allowFontScaling={false} style={styles.bodyText}>
             What kinds of event you have — Class, Work, Personal. Each carries where its notes are
@@ -5472,6 +5503,8 @@ export function AgendaScreen(): React.JSX.Element {
             }}
             onCopy={event => void handleCopyFeedEvent(event)}
             onHide={handleHideFeedEvent}
+            onLinkNote={event => { void linkExistingNote(noteIdentity(event)); }}
+            onUnlinkNote={event => unlinkExistingNote(noteIdentity(event))}
             notePath={detailEvent ? eventNotePaths[detailEvent.uid] : undefined}
             onNoteAction={(event, existingPath) => {
               setDetailEvent(null);
@@ -5479,6 +5512,28 @@ export function AgendaScreen(): React.JSX.Element {
               else handleRequestNoteCreation(event);
             }}
           />
+
+          <Modal visible={recentNotesVisible} transparent animationType="none" onRequestClose={() => setRecentNotesVisible(false)}>
+            <View style={styles.recentNotesOverlay}>
+              <View style={styles.recentNotesCard}>
+                <Text allowFontScaling={false} style={styles.sectionTitle}>Recent Notes</Text>
+                <Text allowFontScaling={false} style={styles.bodyText}>Notes visited through SNFolio or open when you returned to it.</Text>
+                <ScrollView style={styles.recentNotesList}>
+                  {recentNotes.length === 0 && <Text allowFontScaling={false} style={styles.bodyText}>No recent notes yet. Open a note and return to SNFolio to add it here.</Text>}
+                  {recentNotes.map(path => <TouchableOpacity key={path} style={styles.actionSheetBtn} onPress={() => {
+                    setRecentNotesVisible(false);
+                    void handleOpenExistingNote(path);
+                  }}>
+                    <Text allowFontScaling={false} style={styles.actionSheetBtnText}>{path.split('/').pop()?.replace(/\.note$/i, '')}</Text>
+                    <Text allowFontScaling={false} style={styles.bodyText} numberOfLines={1}>{path}</Text>
+                  </TouchableOpacity>)}
+                </ScrollView>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setRecentNotesVisible(false)}>
+                  <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
 
           <ItemCreationModal
             visible={showItemCreationModal}
@@ -5491,6 +5546,10 @@ export function AgendaScreen(): React.JSX.Element {
             availableFeeds={calendarStorage.getSettings().feeds}
             onClose={() => {
               setShowItemCreationModal(false);
+              if (quickAddActive.current) {
+                quickAddActive.current = false;
+                void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
+              }
               setLassoDraftTitle('');
               setLassoDraftParsed(null);
               setLassoDraftDate(null);
@@ -5515,6 +5574,17 @@ export function AgendaScreen(): React.JSX.Element {
             }
             onCreateTask={handleCreateNewTask}
             editingTask={editingTask}
+            eventNotePath={editingEvent ? eventNotePaths[editingEvent.uid] : undefined}
+            onLinkEventNote={event => { void linkExistingNote(noteIdentity(event)); }}
+            onEventNoteAction={(event, path) => {
+              setShowItemCreationModal(false);
+              if (path) void handleOpenExistingNote(path);
+              else handleRequestNoteCreation(event);
+            }}
+            onUnlinkNote={() => {
+              const identity = editingTask?.uid || (editingEvent ? noteIdentity(editingEvent) : undefined);
+              if (identity) unlinkExistingNote(identity);
+            }}
             taskNotePath={editingTask ? calendarStorage.getMapping(editingTask.uid)?.notePath : undefined}
             onLinkTaskNote={task => { void handleLinkExistingTaskNote(task); }}
             onTaskNoteAction={(task, existingPath) => {
@@ -5694,6 +5764,7 @@ export function AgendaScreen(): React.JSX.Element {
 
           {viewMode === 'para' && !openProject && (
             <ParaView
+              isNomad={isNomad}
               initialAreaId={paraFocusAreaId}
               onInitialAreaShown={() => setParaFocusAreaId(null)}
               areas={areas}
@@ -5755,7 +5826,7 @@ export function AgendaScreen(): React.JSX.Element {
               Two framed panels side by side on a Manta; stacked on a Nomad,
               where 1404px cannot carry two columns without wrapping badly. */}
           {viewMode === 'agenda' && plannerMode === 'day' && (
-            <ScrollView style={styles.agendaViewList} keyboardShouldPersistTaps="handled">
+            <DayPlannerSections enabled={isNomad && !isLoading}>
               {/* Weekday strip for jumping within the current week. */}
               <View style={styles.weekStrip}>
                 {weekDays.map((d, offset) => {
@@ -5785,13 +5856,14 @@ export function AgendaScreen(): React.JSX.Element {
                 })}
               </View>
 
-              <View style={isWideScreen ? styles.planeRow : styles.planeStack}>
+              <View style={!isNomad && isWideScreen ? styles.planeRow : styles.planeStack}>
                 {/* ── SCHEDULE ─────────────────────────────────────────── */}
-                <View style={[styles.panel, isWideScreen && styles.panelHalf]}>
+                <View style={[styles.panel, !isNomad && isWideScreen && styles.panelHalf]}>
+                  <PlannerSection id="schedule" title="Schedule" summary={`${events.length} event(s)`}>
                   <View style={styles.panelHeader}>
-                    <Text allowFontScaling={false} style={styles.panelHeaderText}>
+                    {!isNomad && (<Text allowFontScaling={false} style={styles.panelHeaderText}>
                       📅 SCHEDULE ({events.length})
-                    </Text>
+                    </Text>)}
                     <TouchableOpacity
                       onPress={() => {
                         setEditingEvent(null);
@@ -5823,17 +5895,19 @@ export function AgendaScreen(): React.JSX.Element {
                       return type ? `${type.icon ? `${type.icon} ` : ''}${type.name}` : '';
                     }}
                   />
+                  </PlannerSection>
                 </View>
 
                 {/* ── DAY FOCUS & TASKS ────────────────────────────────── */}
-                <View style={[styles.panel, isWideScreen && styles.panelHalf]}>
-                  <View style={styles.panelHeader}>
+                <View style={[styles.panel, !isNomad && isWideScreen && styles.panelHalf]}>
+                  {!isNomad && (<View style={styles.panelHeader}>
                     <Text allowFontScaling={false} style={styles.panelHeaderText}>❤️ FOCUS &amp; DAILY JOURNAL</Text>
-                  </View>
+                  </View>)}
 
                   {/* The journal is a card rather than a button: it is the
                       first thing on this side of the page, so it should read
                       as a place rather than an action. */}
+                  <PlannerSection id="journal" title="Daily Journal" summary={dailyNoteExists === false ? "Create this day’s journal" : "Open this day’s journal"}>
                   <View style={styles.journalCard}>
                     <Text allowFontScaling={false} style={styles.journalTitle}>
                       📝 Daily Journal:{' '}
@@ -5851,10 +5925,12 @@ export function AgendaScreen(): React.JSX.Element {
                     </TouchableOpacity>
                   </View>
 
-                  <View style={styles.subHeader}>
+                  </PlannerSection>
+                  <PlannerSection id="focus" title="Focus" summary={`${focusTasks.length} priority task(s)`}>
+                  {!isNomad && (<View style={styles.subHeader}>
                     <Text allowFontScaling={false} style={styles.subHeaderText}>★ FOCUS FOR THIS DAY</Text>
                     <Text allowFontScaling={false} style={styles.subHeaderMeta}>Top priorities</Text>
-                  </View>
+                  </View>)}
                   {focusTasks.length === 0 ? (
                     <Text allowFontScaling={false} style={styles.panelEmpty}>No open tasks.</Text>
                   ) : (
@@ -5871,10 +5947,12 @@ export function AgendaScreen(): React.JSX.Element {
                     </View>
                   )}
 
+                  </PlannerSection>
+                  <PlannerSection id="tasks" title="Tasks & Deliverables" summary={`${countOpenTasks(daySections)} needing attention`}>
                   <View style={styles.subHeader}>
-                    <Text allowFontScaling={false} style={styles.subHeaderText}>
+                    {!isNomad && (<Text allowFontScaling={false} style={styles.subHeaderText}>
                       ☑ TASKS &amp; DELIVERABLES ({countOpenTasks(daySections)})
-                    </Text>
+                    </Text>)}
                     <TouchableOpacity
                       onPress={() => {
                         setEditingEvent(null);
@@ -5942,9 +6020,11 @@ export function AgendaScreen(): React.JSX.Element {
                     )
                   )}
 
-                  <View style={styles.subHeader}>
+                  </PlannerSection>
+                  <PlannerSection id="projects" title="Projects Needing Attention" summary={`${attentionProjects.length} project(s)`}>
+                  {!isNomad && (<View style={styles.subHeader}>
                     <Text allowFontScaling={false} style={styles.subHeaderText}>🚀 PROJECTS NEEDING ATTENTION</Text>
-                  </View>
+                  </View>)}
 
                   {attentionProjects.length === 0 ? (
                     <Text allowFontScaling={false} style={styles.panelEmpty}>No projects need attention.</Text>
@@ -5971,24 +6051,28 @@ export function AgendaScreen(): React.JSX.Element {
                     })
                   )}
 
+                  </PlannerSection>
+                  <PlannerSection id="tomorrow" title="Tomorrow" summary={lookaheadSummary}>
                   {/* A calendar preview and direct route to tomorrow. Tasks are
                       already named and actionable in the section above. */}
-                  <View style={styles.subHeader}>
+                  {!isNomad && (<View style={styles.subHeader}>
                     <Text allowFontScaling={false} style={styles.subHeaderText}>🔮 TOMORROW'S SCHEDULE</Text>
-                  </View>
+                  </View>)}
                   <TouchableOpacity style={styles.lookaheadRow} onPress={handleNextDay}>
                     <Text allowFontScaling={false} style={styles.lookaheadText} numberOfLines={2}>
                       {lookaheadSummary}
                     </Text>
                     <Text allowFontScaling={false} style={styles.lookaheadAction}>View ›</Text>
                   </TouchableOpacity>
+                  </PlannerSection>
                 </View>
               </View>
-            </ScrollView>
+            </DayPlannerSections>
           )}
 
           {viewMode === 'agenda' && plannerMode === 'week' && (
             <WeeklyReviewView
+              isNomad={isNomad && !isLoading}
               selectedDate={selectedDate}
               weekStartsOn={weekStartsOn}
               tasks={tasks}
@@ -6015,6 +6099,9 @@ export function AgendaScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
+  recentNotesOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  recentNotesCard: { width: '85%', maxHeight: '80%', padding: 16, borderWidth: 2, borderColor: '#000', backgroundColor: '#fff' },
+  recentNotesList: { flexShrink: 1, marginVertical: 10 },
   root: {
     flex: 1,
     backgroundColor: '#ffffff',

@@ -132,6 +132,19 @@ Under **Calendars & Sync**:
 
 For all three controls, the selected choice has a **black background with white text**; the other choice has a white background and black outline.
 
+### Floating Icon and Recent Notes
+
+On **Manta and Nomad**, enable **Floating SNFolio icon** under **⚙ → Connections & Settings → App & View**. It is off by default.
+
+- **Minimize** in the ⚙ menu returns to your note and leaves the floating **SN** icon available.
+- **Tap the icon while viewing a note** to reopen SNFolio at its previous section and date.
+- **Tap the icon inside SNFolio** to choose from **Recent Notes** and return to a note.
+- **Hold and release** the icon for **Quick Add**, using the event/task form. Saving or canceling minimizes SNFolio again.
+- **Drag** the icon to move it; its position is remembered.
+- **Exit SNFolio**, closing through the toolbar, or turning the setting off removes the icon.
+
+Recent Notes remembers up to 12 notes opened through SNFolio or open when you return to it. It is saved across restarts; it does not scan your library or represent every note open on the device.
+
 ### PARA Workspace
 
 The **PARA** tab now represents all four categories:
@@ -157,7 +170,15 @@ The **PARA** tab now represents all four categories:
 - Day Planner shows the selected day's schedule, journal, three focus tasks, grouped Tasks & Deliverables, Projects needing attention, and Tomorrow's Schedule.
 - Meetings display start/end times, locations, attendee lists, and agenda previews.
 
-### 3. Create a Single Meeting Note
+On **Nomad**, Day Planner sections are collapsible and have fixed shortcuts for Schedule, Journal, Focus, Tasks, Projects, and Tomorrow. They start collapsed on first use and remember your expansion choices. Weekly Review keeps its note button and summary counts visible, with collapsible Projects, Deadlines, and Journals sections and separate saved expansion choices. PARA has fixed Projects, Areas, Resources, and Archive shortcuts. **Manta keeps its expanded planner layouts and existing PARA navigation.**
+
+### 3. Link or Create a Note
+
+- When creating a task or event, choose **Link Note** to select an existing `.note` file. The link is saved only when you save the item; canceling discards the pending link.
+- Existing tasks and events offer **Create Note** and **Link Note** when unlinked. Linked items offer **Open Note**, **Change Link**, and **Unlink** in their editor or event details.
+- Linking, changing a link, or unlinking returns to the previous planner section. **Unlink** only removes the association; it does not delete the note file.
+
+To create a new note:
 - Tap an event and choose **Create Note**. Taller Day View blocks also show the command directly. For a task, edit it or use its note action in **All Tasks**.
 - Edit the proposed note name, then review the resolved folder and template. Event notes retain the Meeting/Class choice. Choose the assigned Project/Area folder, the standard folder, or browse to another folder without changing the item's PARA membership.
 - The plugin then:

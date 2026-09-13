@@ -1,3 +1,4 @@
+import { notePageCount } from '../domain/notePageCount';
 import { FileUtils, PluginCommAPI, PluginFileAPI } from 'sn-plugin-lib';
 import { CalendarEvent, CalendarSettings, CalendarTask, EventType, NoteKind } from '../domain/types';
 import { generateNoteFilename, safeNoteFilename } from '../domain/meetingSnapshot';
@@ -169,7 +170,7 @@ export class MeetingNoteService {
     }
     try {
       const existing: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
-      if (existing?.success && typeof existing.data === 'number' && existing.data > 0) {
+      if (notePageCount(existing) !== undefined) {
         return { success: false, notePath, error: `${safeNoteFilename(noteName)} already exists in this folder.` };
       }
       const created = await this.createNoteWithTemplate(notePath, template || DEFAULT_SYSTEM_TEMPLATE);
@@ -244,18 +245,19 @@ export class MeetingNoteService {
       // Check total page num to see if notebook exists
       const totalPagesRes: any = await PluginFileAPI.getNoteTotalPageNum(notePath);
 
-      if (totalPagesRes && totalPagesRes.success && typeof totalPagesRes.data === 'number' && totalPagesRes.data > 0) {
+      const pages = notePageCount(totalPagesRes);
+      if (pages !== undefined) {
         if (noteName && !existingMapping) {
           return {
             success: false,
             notePath,
-            pageNum: totalPagesRes.data,
+            pageNum: pages,
             isNewFile: false,
             error: `${filename} already exists in this folder. Choose another note name.`,
           };
         }
         // File exists -> Append page to existing series notebook
-        const lastPage = totalPagesRes.data;
+        const lastPage = pages;
         // insertNotePage documents its template as a name, so the configured
         // value goes straight through; a custom PNG path is passed as-is too.
         const insertRes: any = await PluginFileAPI.insertNotePage({

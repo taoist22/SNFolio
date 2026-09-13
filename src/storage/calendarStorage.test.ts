@@ -859,3 +859,13 @@ test('time format defaults to 12-hour and survives a storage reload', async () =
   await restored.load();
   expect(restored.getSettings().timeFormat).toBe('24h');
 });
+
+test('unlink removes mapping aliases without queuing deletion or affecting other note links', () => {
+  const store = new CalendarStorage();
+  store.setMapping({ eventUid: 'event', seriesId: 'series', notePath: '/Note/Keep.note', lastPageNum: 1, lastCreatedIso: '' });
+  store.setMapping({ eventUid: 'other', notePath: '/Note/Keep.note', lastPageNum: 1, lastCreatedIso: '' });
+  store.unlinkMapping('event');
+  expect(store.getMapping('event')).toBeUndefined();
+  expect(store.getMapping('series')).toBeUndefined();
+  expect(store.getMapping('other')?.notePath).toBe('/Note/Keep.note');
+});

@@ -20,6 +20,7 @@ import {
 import { projectOverviewItems } from '../domain/projectOverview';
 
 interface ParaViewProps {
+  isNomad?: boolean;
   /** Opens a just-converted Project at its new location instead of Projects. */
   initialAreaId?: string | null;
   onInitialAreaShown?: () => void;
@@ -72,6 +73,7 @@ interface ParaViewProps {
  * how far along, when due, what is in them.
  */
 export function ParaView({
+  isNomad = false,
   initialAreaId,
   onInitialAreaShown,
   areas,
@@ -129,6 +131,9 @@ export function ParaView({
     // user away from the Area that was just revealed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const navigationScroll = React.useRef<ScrollView>(null);
+  const detailsScroll = React.useRef<ScrollView>(null);
+  const categoryOffsets = React.useRef<Partial<Record<ParaSection, number>>>({});
   const [expanded, setExpanded] = React.useState<Record<ParaSection, boolean>>({
     projects: true,
     areas: true,
@@ -300,11 +305,31 @@ export function ParaView({
         </View>
       )}
 
+      {isNomad && (
+        <View style={styles.categoryShortcuts}>
+          {(['projects', 'areas', 'resources', 'archive'] as const).map(category => (
+            <TouchableOpacity key={category} accessibilityRole="button" accessibilityState={{ selected: section === category }}
+              style={[styles.categoryShortcut, section === category && styles.areaRowActive]}
+              onPress={() => {
+                setSection(category);
+                setSelectedItemId(null);
+                setExpanded(current => ({ ...current, [category]: true }));
+                navigationScroll.current?.scrollTo({ y: categoryOffsets.current[category] || 0, animated: false });
+                detailsScroll.current?.scrollTo({ y: 0, animated: false });
+              }}>
+              <Text allowFontScaling={false} style={[styles.categoryShortcutText, section === category && styles.areaTextActive]}>
+                {category[0].toUpperCase() + category.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
       <View style={styles.columns}>
         <View style={styles.leftPane}>
           <Text allowFontScaling={false} style={styles.paneHeading}>PARA</Text>
-          <ScrollView style={styles.paneScroll} keyboardShouldPersistTaps="always">
+          <ScrollView ref={navigationScroll} style={styles.paneScroll} keyboardShouldPersistTaps="always">
             <TouchableOpacity
+              onLayout={event => { categoryOffsets.current.projects = event.nativeEvent.layout.y; }}
               style={[styles.areaRow, showProjects && !selectedItemId && styles.areaRowActive]}
               onPress={() => toggleSection('projects')}
             >
@@ -332,6 +357,7 @@ export function ParaView({
             ))}
 
             <TouchableOpacity
+              onLayout={event => { categoryOffsets.current.areas = event.nativeEvent.layout.y; }}
               style={[styles.areaRow, showAreas && !selectedItemId && styles.areaRowActive]}
               onPress={() => toggleSection('areas')}
             >
@@ -359,6 +385,7 @@ export function ParaView({
             })}
 
             <TouchableOpacity
+              onLayout={event => { categoryOffsets.current.resources = event.nativeEvent.layout.y; }}
               style={[styles.areaRow, showResources && !selectedItemId && styles.areaRowActive]}
               onPress={() => toggleSection('resources')}
             >
@@ -385,6 +412,7 @@ export function ParaView({
             })}
 
             <TouchableOpacity
+              onLayout={event => { categoryOffsets.current.archive = event.nativeEvent.layout.y; }}
               style={[styles.areaRow, showArchive && !selectedItemId && styles.areaRowActive]}
               onPress={() => toggleSection('archive')}
             >
@@ -431,7 +459,7 @@ export function ParaView({
               : selectedProject ? `🚀 ${selectedProject.name}` : '🚀 Projects'}
           </Text>
 
-          <ScrollView style={styles.paneScroll} keyboardShouldPersistTaps="always">
+          <ScrollView ref={detailsScroll} style={styles.paneScroll} keyboardShouldPersistTaps="always">
             {showAreas && !selectedArea && activeAreas.length === 0 && (
               <Text allowFontScaling={false} style={styles.empty}>
                 No active Areas. Areas are ongoing parts of life or work that do not have a finish line.
@@ -1111,6 +1139,9 @@ const styles = StyleSheet.create({
     color: '#000000',
   },
   columns: { flex: 1, flexDirection: 'row' },
+  categoryShortcuts: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 },
+  categoryShortcut: { borderWidth: 2, borderColor: '#000', backgroundColor: '#fff', minHeight: 44, paddingHorizontal: 12, justifyContent: 'center', marginRight: 6, marginBottom: 4 },
+  categoryShortcutText: { color: '#000', fontSize: 13, fontWeight: 'bold' },
   leftPane: {
     width: '32%',
     borderRightWidth: 2,

@@ -13,6 +13,8 @@ interface EventDetailsModalProps {
   onCopy: (event: CalendarEvent) => void;
   onHide: (event: CalendarEvent) => void;
   notePath?: string;
+  onLinkNote?: (event: CalendarEvent) => void;
+  onUnlinkNote?: (event: CalendarEvent) => void;
   onNoteAction: (event: CalendarEvent, existingPath?: string) => void;
 }
 
@@ -24,7 +26,7 @@ export function EventDetailsModal({
   onDelete,
   onCopy,
   onHide,
-  notePath,
+  notePath, onLinkNote, onUnlinkNote,
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
   const timeFormat = useTimeFormat();
@@ -61,6 +63,12 @@ export function EventDetailsModal({
           {/* Short timed blocks and all-day rows cannot safely fit inline
               controls. Details is therefore the universal route to an event
               note, regardless of duration, recurrence, or source calendar. */}
+          {onLinkNote && <TouchableOpacity style={styles.noteAction} onPress={() => onLinkNote(event)}>
+            <Text allowFontScaling={false}>{notePath ? 'Change Link…' : 'Link Note…'}</Text>
+          </TouchableOpacity>}
+          {notePath && onUnlinkNote && <TouchableOpacity style={styles.noteAction} onPress={() => onUnlinkNote(event)}>
+            <Text allowFontScaling={false}>Unlink</Text>
+          </TouchableOpacity>}
           <TouchableOpacity style={styles.noteAction} onPress={() => onNoteAction(event, notePath)}>
             <Text allowFontScaling={false} style={styles.noteActionText}>
               {notePath ? '📂 Open Note' : '📝 Create Note'}

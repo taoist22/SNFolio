@@ -14,6 +14,7 @@ public class CalendarFilePackage implements ReactPackage {
     public List<NativeModule> createNativeModules(ReactApplicationContext reactContext) {
         List<NativeModule> modules = new ArrayList<>();
         modules.add(new CalendarFileModule(reactContext));
+        modules.add(new FloatingLauncherModule(reactContext));
         return modules;
     }
 

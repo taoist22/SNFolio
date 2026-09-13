@@ -285,6 +285,10 @@ export interface CalendarSettings {
   /** @deprecated Retained only so older stored settings still deserialize. */
   themeMode: ProfileThemeMode;
   timeFormat?: '12h' | '24h';
+  floatingLauncherEnabled?: boolean;
+  recentNotePaths?: string[];
+  nomadWeeklySections?: Partial<Record<'projects' | 'deadlines' | 'journal', boolean>>;
+  nomadPlannerSections?: Partial<Record<'schedule' | 'journal' | 'focus' | 'tasks' | 'projects' | 'tomorrow', boolean>>;
   hideAllDayEvents: boolean; // default: false
   hideSoloEvents: boolean; // default: false
   caldavEnabled?: boolean;

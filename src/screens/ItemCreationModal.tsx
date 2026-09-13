@@ -1,3 +1,4 @@
+import { pickLinkedNote } from '../supernote/pickLinkedNote';
 import { useTimeFormat } from './TimeFormatContext';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -83,10 +84,12 @@ interface ItemCreationModalProps {
     targetFeedId: string,
     typeId?: string,
     projectId?: string,
-    areaId?: string
+    areaId?: string,
+    linkedNotePath?: string
   ) => void;
   /** dueDate omitted means a genuinely undated task, not one dated today. */
   onCreateTask: (task: {
+    linkedNotePath?: string;
     uid?: string;
     title: string;
     dueDate?: Date;
@@ -105,6 +108,10 @@ interface ItemCreationModalProps {
   editingTask?: CalendarTask | null;
   /** Linked handwritten note for this task, if one exists. */
   taskNotePath?: string;
+  eventNotePath?: string;
+  onEventNoteAction?: (event: CalendarEvent, path?: string) => void;
+  onLinkEventNote?: (event: CalendarEvent) => void;
+  onUnlinkNote?: () => void;
   onLinkTaskNote?: (task: CalendarTask) => void;
   onTaskNoteAction?: (task: CalendarTask, existingPath?: string) => void;
   /** Only offered while editing an existing item, never while creating one. */
@@ -139,7 +146,7 @@ export function ItemCreationModal({
   onCreateTask,
   onDeleteTask,
   editingTask,
-  taskNotePath,
+  taskNotePath, eventNotePath, onEventNoteAction, onLinkEventNote, onUnlinkNote,
   onTaskNoteAction,
   onLinkTaskNote,
   areas = [],
@@ -154,6 +161,10 @@ export function ItemCreationModal({
   eventAreaId,
 }: ItemCreationModalProps): React.JSX.Element {
   const timeFormat = useTimeFormat();
+  const [draftNote, setDraftNote] = useState<string | undefined>();
+  const [pickingNote, setPickingNote] = useState(false);
+  const [noteError, setNoteError] = useState('');
+  useEffect(() => { if (visible) { setDraftNote(undefined); setNoteError(''); } }, [visible]);
   const [title, setTitle] = useState<string>('');
   const titleInputRef = useRef<HandwritingTextInputHandle>(null);
 
@@ -374,11 +385,13 @@ export function ItemCreationModal({
         selectedFeedId,
         typeValue,
         projectValue,
-        derivedArea ? undefined : areaValue
+        derivedArea ? undefined : areaValue,
+        draftNote
       );
     } else {
       onCreateTask({
-        uid: editingEvent?.uid,
+        uid: editingTask?.uid ?? editingEvent?.uid,
+        linkedNotePath: draftNote,
         status: taskStatusValue,
         priority: taskPriorityValue,
         // Omitted when a project decides it, so the record never carries a
@@ -412,7 +425,7 @@ export function ItemCreationModal({
   if (!visible) return <></>;
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
+    <Modal visible={visible && !pickingNote} transparent animationType="fade">
       <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
         <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
           <View style={styles.modalHeader}>
@@ -1099,22 +1112,31 @@ export function ItemCreationModal({
 
           </ScrollView>
 
-          {editingTask && (onTaskNoteAction || onLinkTaskNote) && (
-            <View style={styles.noteActionRow}>
-              {!taskNotePath && onLinkTaskNote && (
-                <TouchableOpacity style={styles.taskNoteBtn} onPress={() => onLinkTaskNote(editingTask)}>
-                  <Text allowFontScaling={false} style={styles.taskNoteBtnText}>Link Note…</Text>
-                </TouchableOpacity>
-              )}
-              {onTaskNoteAction && (
-                <TouchableOpacity style={styles.taskNoteBtn} onPress={() => onTaskNoteAction(editingTask, taskNotePath)}>
-                  <Text allowFontScaling={false} style={styles.taskNoteBtnText}>
-                    {taskNotePath ? 'Open Note' : 'Create Note'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
+          {noteError ? <Text allowFontScaling={false} style={styles.label}>{noteError}</Text> : null}
+          <View style={styles.noteActionRow}>
+            <TouchableOpacity style={styles.taskNoteBtn} onPress={async () => {
+              if (editingTask && onLinkTaskNote) { onLinkTaskNote(editingTask); return; }
+              if (editingEvent && onLinkEventNote) { onLinkEventNote(editingEvent); return; }
+              setTitle(titleInputRef.current?.getValue() ?? title);
+              setLocation(locationInputRef.current?.getValue() ?? location);
+              setDescription(descriptionInputRef.current?.getValue() ?? description);
+              setPickingNote(true); setNoteError('');
+              try { const path = await pickLinkedNote(); if (path) setDraftNote(path); }
+              catch (error: any) { setNoteError(error?.message || 'Could not select note.'); }
+              finally { setPickingNote(false); }
+            }}>
+              <Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath || draftNote) ? 'Change Link…' : 'Link Note…'}</Text>
+            </TouchableOpacity>
+            {(taskNotePath || eventNotePath || draftNote) && <TouchableOpacity style={styles.taskNoteBtn} onPress={() => {
+              if (editingTask || editingEvent) onUnlinkNote?.();
+              else setDraftNote(undefined);
+            }}><Text allowFontScaling={false} style={styles.taskNoteBtnText}>Unlink</Text></TouchableOpacity>}
+            {(editingTask || editingEvent) && <TouchableOpacity style={styles.taskNoteBtn} onPress={() => {
+              if (editingTask) onTaskNoteAction?.(editingTask, taskNotePath);
+              else if (editingEvent) onEventNoteAction?.(editingEvent, eventNotePath);
+            }}><Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath) ? 'Open Note' : 'Create Note'}</Text></TouchableOpacity>}
+          </View>
+          {draftNote && <Text allowFontScaling={false} style={styles.label} numberOfLines={1}>Link on save: {draftNote.split('/').pop()}</Text>}
           <View style={styles.footerRow}>
             <TouchableOpacity
               style={[styles.saveBtn, itemKind === 'task' ? styles.compactTaskSave : styles.footerGrow]}

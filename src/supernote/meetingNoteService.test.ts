@@ -109,7 +109,7 @@ describe('meetingNoteService', () => {
   test('appends page to existing recurring meeting notebook', async () => {
     (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({
       success: true,
-      data: 3,
+      result: 3,
     });
 
     const recurringEvent: CalendarEvent = {
@@ -125,7 +125,7 @@ describe('meetingNoteService', () => {
   });
 
   test('fails cleanly when appending a recurring notebook page fails', async () => {
-    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, data: 3 });
+    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, result: 3 });
     (PluginFileAPI.insertNotePage as jest.Mock).mockResolvedValueOnce({
       success: false,
       error: { message: 'page locked' },
@@ -212,7 +212,7 @@ describe('note kind routing', () => {
   });
 
   test('uses an editable event-note name and refuses to append to an unrelated collision', async () => {
-    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, data: 2 });
+    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, result: 2 });
     const res = await meetingNoteService.createOrAppendMeetingNote(
       { ...sampleEvent, uid: 'evt-custom-collision' },
       false,
@@ -259,7 +259,7 @@ describe('note kind routing', () => {
       lastPageNum: 1,
       lastCreatedIso: new Date().toISOString(),
     });
-    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, data: 1 });
+    (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, result: 1 });
 
     const res = await meetingNoteService.createOrAppendMeetingNote(
       { ...sampleEvent, uid: 'evt-series-routed-week-2', recurringSeriesId: 'series-routed' },

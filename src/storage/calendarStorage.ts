@@ -581,6 +581,17 @@ export class CalendarStorage {
     void this.save();
   }
 
+  unlinkMapping(identity: string): void {
+    const mapping = this.mappings[identity];
+    if (!mapping) return;
+    for (const key of Object.keys(this.mappings)) {
+      const candidate = this.mappings[key];
+      if (key === identity || (candidate.eventUid === mapping.eventUid && candidate.seriesId === mapping.seriesId && candidate.notePath === mapping.notePath)) delete this.mappings[key];
+    }
+    // Unlinking never removes or queues deletion of the user's note file.
+    void this.save();
+  }
+
   setMapping(mapping: MeetingNoteMapping): void {
     this.mappings[mapping.eventUid] = mapping;
     if (mapping.seriesId) {

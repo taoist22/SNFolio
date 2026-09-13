@@ -116,3 +116,72 @@ Build 49 clean native package validation: Pass. Host Hermes bytecode/runtime che
 The maintainer accepted build 51 on the Nomad (“this is good”) and authorized release. Build 52 promotes the same application code with final version metadata; README documentation was updated after candidate acceptance.
 
 Final checks: 635 tests / 43 suites pass; TypeScript passes; lint has zero errors (549 warnings); clean build and native package validation pass, including app.npk and final version 0.1.21/build 52.
+
+## Build 53 — 0.1.22-rc.1 Nomad Day Planner candidate
+
+- SDK device type 4 (A6 X2 / Nomad) enables collapsible sections; other devices, including Manta (type 5), retain the expanded Day Planner layout.
+- Schedule, Daily Journal, Focus, Tasks & Deliverables, Projects Needing Attention, and Tomorrow start collapsed on first use, with summaries visible. Expansion preferences are saved after storage loads.
+- Fixed shortcuts expand a selected section and scroll to it without collapsing other sections.
+- 637 tests / 44 suites pass, including expanded non-Nomad behavior and Nomad expansion persistence/shortcut opening. Typecheck passes; lint has zero errors (558 warnings).
+- Device acceptance pending: Nomad section toggles, shortcut scrolling, saved state after reopening, and existing journal/task actions; Manta expanded layout spot-check.
+- Floating launcher remains a separate follow-up; this candidate covers the Day Planner change.
+- Clean native build and package validation pass; packaged version is 0.1.22-rc.1/build 53 with app.npk.
+
+## Build 54 — 0.1.22-rc.2 Nomad Weekly Review and PARA candidate
+
+- Extends the accepted build 53 Day Planner behavior to Weekly Review: fixed weekly note control and summary counts, plus Projects / Deadlines / Journals shortcuts and collapsible sections. Expansion preferences are stored separately from Day Planner.
+- Nomad PARA adds fixed Projects / Areas / Resources / Archive shortcuts. Selecting one opens the category, scrolls its navigation entry into view, and resets the details pane to the top. Existing category expansion and two-pane navigation remain available.
+- Manta and other non-Nomad devices retain expanded Weekly Review and existing PARA navigation.
+- 638 tests / 44 suites pass; typecheck passes; lint has zero errors (558 warnings).
+- Device checks pending: Weekly Review scrolling/persistence and note actions, PARA navigation with a long list, Day Planner regression check, and Manta layout spot-check.
+- Clean native build and package validation pass; packaged version is 0.1.22-rc.2/build 54 with app.npk.
+
+## Build 55 — 0.1.22-rc.3 floating launcher candidate
+
+- App & View includes an explicit Floating SNFolio icon OFF / ON choice, default off, for both Nomad and Manta.
+- When enabled, Minimize shows a draggable native SN icon and closes the panel. Tap reopens the existing view; hold at least 700 ms and release opens the existing event/task form. Save/cancel returns to the floating icon. Position is saved in private Android preferences and clamped to the screen when shown.
+- Toolbar activation clears the icon while retaining existing host toolbar-toggle behavior. Exit closes and removes it; turning the preference off removes it. Native teardown and plugin unmount/destroy remove the overlay.
+- Opening linked notes through closePanel retains the icon when enabled. Overlay creation failure keeps the plugin open and reports the error.
+- 642 tests / 45 suites pass; typecheck passes; lint has zero errors (577 warnings).
+- On-device acceptance pending on both models: enable, minimize/tap restoration, hold Quick Add for event/task and save/cancel, drag vs tap, toolbar close, Exit, toggle off, linked-note return, and plugin removal cleanup.
+- Clean native build and package validation pass; version 0.1.22-rc.3/build 55, launcher class in DEX, and Android overlay permission verified.
+
+## Build 56 — 0.1.22-rc.4 two-way floating launcher
+
+- Enabled icon remains visible inside SNFolio. Single tap there opens Recent Notes; single tap from a note reopens the retained SNFolio view. Hold Quick Add and drag behavior retained.
+- Recent Notes stores up to 12 deduplicated note paths observed when returning to SNFolio or opened through its shared note opener. It is not a device-wide history scan or open-window list. Failed metadata reads do not block navigation.
+- Note selection uses existing opening/error handling and returns to the icon. Toolbar/Exit cleanup retained; toolbar activation reconciles icon visibility after the host toggles its view.
+- 645 tests / 46 suites pass, including foreground/background tap dispatch and recent-history ordering/bounds. Typecheck and lint pass with zero errors. Clean native package validation passes for 0.1.22-rc.4/build 56.
+- Both-device acceptance pending: icon in Month/Day/Weekly/PARA, choose recent note and return to same view, Quick Add, drag, toolbar close/Exit, and history after restart.
+
+## Build 57 — 0.1.22-rc.5 task Link Note fix
+
+- Confirmed in bundled SDK native bridge: getNoteTotalPageNum returns success/result, while Link Note incorrectly checked data. Added shared validated page-count handling with legacy data compatibility and used it for linking and existing notebook checks.
+- Link Note now requests file-read access and allows its dialog to dismiss before launching the native picker. Failed note reads retain the SDK error message.
+- Updated note service fixtures to the actual SDK result shape. 647 tests / 47 suites pass; typecheck passes; lint has zero errors (590 warnings).
+- Device acceptance pending: edit an existing task, Link Note, select a .note file, reopen task and use Open Note; verify link after reopening SNFolio. Also check picker cancellation.
+- Clean native package validation passes for 0.1.22-rc.5/build 57, including app.npk.
+
+## Build 58 — 0.1.22-rc.6 task linking flow correction
+
+- Build 57 device feedback: linking still returned to Create Task Note. The fallback routing was incorrect and page-count validation remained an unnecessary prerequisite.
+- Link Note now saves the selected .note path directly, with first-page metadata, without querying notebook page count. It does not create or modify the note.
+- Successful linking returns to the task editor showing Open Note. Cancellation and errors also return to the task editor, never to Create Task Note.
+- 647 tests / 47 suites pass; typecheck passes; lint has zero errors (590 warnings). Device acceptance pending for linking/opening and picker cancellation.
+- Clean native package validation passes for 0.1.22-rc.6/build 58, including app.npk.
+
+## Build 59 — 0.1.22-rc.7 consistent note actions
+
+- Linking an existing task/event now dismisses item dialogs and returns to the prior planner view, without reopening a task editor or Create Task Note.
+- New task/event forms offer Link Note. Picker selection remains a draft until Save; Cancel discards it. Existing items offer Create Note or Open Note, plus Link Note / Change Link and Unlink. Event details also expose linking/unlinking.
+- Unlink removes mapping aliases without deleting or queuing deletion of the note file; other items linked to the same file remain linked.
+- Task saves retain editingTask.uid rather than depending solely on a synthetic editingEvent uid.
+- 651 tests / 48 suites pass, including draft task/event link saves, draft cancellation, and mapping-only unlink. Typecheck passes; lint has zero errors (611 warnings).
+- Both-device acceptance pending: link existing task/event returns to planner, new task/event Link Note then Save/Cancel, Create/Open Note actions, Change Link and Unlink preserving files.
+- Clean native package validation passes for 0.1.22-rc.7/build 59, including app.npk.
+
+## Release 0.1.22 / build 60
+
+The maintainer accepted build 59 (“This is good”) and authorized README updates, commit, push, and release. Build 60 promotes the same application code with final version metadata and documentation.
+
+Final validation: 651 tests / 48 suites pass; typecheck passes; lint has zero errors (611 warnings); clean native build and package validation pass for 0.1.22/build 60, including native launcher code.
