@@ -224,3 +224,38 @@ Built from release 0.1.22 (18140f4). Earlier uncommitted builds 61–67 (navigat
 The maintainer accepted build 64 ("works") and authorized README updates, commit, and release. Build 65 promotes the same application code with final version metadata and documentation.
 
 Final validation: 657 tests / 49 suites pass; typecheck passes; lint has zero errors (622 warnings); clean native build and package validation pass for 0.1.23/build 65, including app.npk.
+
+## Build 66 — 0.1.24-rc.1 floating icon removed
+
+- 0.1.23 device result: with the floating icon on, Link Note in a new event form did nothing, Day Planner + Add Task did nothing, and Quick Add stopped opening, whether SNFolio was opened from the icon or the toolbar. With the icon off, everything worked as designed. A further test showed the native note picker opening with the SN icon on top of its Link Note button. Code reading: ItemCreationModal hides itself while `pickingNote` is true and waits on the native picker; a picker that never returns leaves every later use of the form hidden. The maintainer chose to remove the floating icon.
+- Removed: floating icon and its App & View setting, ⚙ Minimize, Quick Add, Recent Files, the in-panel Browse Files browser, FloatingLauncherModule (native overlay), the SYSTEM_ALERT_WINDOW permission, and the floatingLauncherEnabled / recentNotePaths settings. index.js, exportService.ts, CalendarFilePackage.java and AndroidManifest.xml are identical to 0.1.21; Exit and note opening close the panel with PluginManager.closePluginView() as in 0.1.21.
+- Kept: all other 0.1.22/0.1.23 changes, including the Nomad layouts, note linking, the save-before-close test, and the calendarStorage test type fix. The startup data-loss race is gone with its only trigger (launcher-driven recent-file capture before storage loaded).
+- 646 tests / 46 suites pass; typecheck passes; lint has zero errors (580 warnings). Clean build and package validation pass for 0.1.24-rc.1/build 66; the native package no longer contains the launcher module and the bundle has no icon, Recent Files, Minimize, or Browse Files text.
+- Before installing over 0.1.23, turn the floating icon off or restart the device afterwards, so no leftover overlay remains.
+- Device checks: Day Planner + Add Task saves; new event and new task Link Note pick and save; Create/Open Note from events and tasks; lasso Add to Calendar; Exit closes SNFolio; App & View shows no floating icon setting; ⚙ menu has no Minimize; existing tasks, events and settings survive update, Exit, and restart.
+
+## Build 67 — 0.1.24-rc.2 SNFolio never deletes notes
+
+- Build 66 device result: maintainer reported everything working with the floating icon removed.
+- Maintainer decision after accidentally deleting linked notes with Delete both: SNFolio must never delete a note, whether linked or created by SNFolio.
+- Delete sheet for a non-recurring event with a note: Delete both removed; "Delete the event, keep the note" deletes the event, unlinks the note, and reports the kept note by name; "Replace the note, keep the event" becomes "Unlink the note, keep the event" (clears the recorded Meeting/Class kind, file untouched).
+- Deleting a task with a linked note unlinks it and reports the kept note by name.
+- All FileUtils.deleteFile calls removed: no immediate note deletion, no queueing, and no queue flush when a note is created or opened (DELETE_BEFORE_OPEN_DELAY_MS removed). calendarStorage.queueNoteDeletion removed.
+- Help & Setup adds Notes Queued for Deletion: Check Queued Notes lists anything an older version queued (with "Not found" for missing files) and Keep These Notes empties the queue on disk. Queue paths are still rewritten on PARA folder moves.
+- README documents that SNFolio never deletes notes and the queue check.
+- 647 tests / 46 suites pass (new: clearing the queue persists across reload; folder-move test seeds the queue from stored data). Typecheck passes; lint has zero errors (572 warnings). Clean build and package validation pass for 0.1.24-rc.2/build 67.
+- Device checks: (1) BEFORE opening any note from SNFolio, Help & Setup → Check Queued Notes; record the result; Keep These Notes if anything is listed. (2) Delete an event with a linked note → only "Delete the event, keep the note", "Unlink the note, keep the event", Cancel; delete → event gone, note file still in its folder, message names it. (3) Unlink on another event → Create Note asks Meeting or Class; old file still present. (4) Delete a task with a linked note → message names the kept note; file present. (5) Create Note and Open Note still work.
+
+## Build 68 — 0.1.24-rc.3 task delete confirmation
+
+- Build 67 device result (Manta): deleting a task with a linked note deleted the task immediately, kept and unlinked the note, and showed the kept-note message — but did not ask first, unlike events. Maintainer asked for the same confirmation for tasks.
+- Maintainer also reported Create Note missing from new event and task forms. Not a regression: ItemCreationModal is unchanged since 0.1.22 and has shown Create Note only for existing items since 0.1.21 (tasks) / 0.1.22 (events). Adding it to new-item forms would be a new feature; not built.
+- Task deletion from the task form and the task row ✕ now goes through requestDeleteTask: a task with a linked note shows "Only the task is deleted…", the note name, "🗑️ Delete the task, keep the note", and Cancel. Tasks without a note delete as before.
+- 647 tests / 46 suites pass; typecheck passes; lint has zero errors (574 warnings). Clean build and package validation pass for 0.1.24-rc.3/build 68.
+- Device checks: delete a task with a linked note from the task form, then from a task row ✕ → sheet appears; Cancel keeps the task; Delete removes the task, keeps the note file, shows the message. A task without a note deletes without the sheet. Event delete sheet unchanged.
+
+## Release 0.1.24 / build 69
+
+The maintainer accepted build 68 ("this is good") and authorized commit, push, and release. Build 69 promotes the same application code with final version metadata.
+
+Final validation: 647 tests / 46 suites pass; typecheck passes; lint has zero errors (574 warnings); clean native build and package validation pass for 0.1.24/build 69, including app.npk without the floating launcher module.

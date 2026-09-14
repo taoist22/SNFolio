@@ -132,20 +132,6 @@ Under **Calendars & Sync**:
 
 For all three controls, the selected choice has a **black background with white text**; the other choice has a white background and black outline.
 
-### Floating Icon and Recent Files
-
-On **Manta and Nomad**, enable **Floating SNFolio icon** under **⚙ → Connections & Settings → App & View**. It is off by default.
-
-- **Minimize** in the ⚙ menu returns to your note and leaves the floating **SN** icon available.
-- **Tap the icon while viewing a note, PDF, or EPUB** to reopen SNFolio at its previous section and date.
-- **Hold and release the icon while viewing a note, PDF, or EPUB** for **Quick Add**, using the event/task form. Saving or closing the form returns you to that file.
-- **Tap the icon inside SNFolio** to choose from **Recent Files** and return to a note or document. Holding the icon inside SNFolio does nothing.
-- **Browse Files…** at the bottom left of Recent Files opens a file browser inside SNFolio. Choose **Internal** or an SD card, open folders, use **↑ Up** to go back, and tap a file to open it. **Cancel** returns to SNFolio.
-- **Drag** the icon to move it; its position is remembered.
-- **Exit SNFolio**, closing through the toolbar, or turning the setting off removes the icon.
-
-Recent Files shows up to 12 notes, PDFs, and EPUBs in two columns, newest first, reading across each row. Each entry shows the file name and its folder. The list includes files opened through SNFolio or open when you return to it. It is saved across restarts; it does not scan your library or represent every file open on the device.
-
 ### PARA Workspace
 
 The **PARA** tab now represents all four categories:
@@ -178,6 +164,8 @@ On **Nomad**, Day Planner sections are collapsible and have fixed shortcuts for 
 - When creating a task or event, choose **Link Note** to select an existing `.note` file. The link is saved only when you save the item; canceling discards the pending link.
 - Existing tasks and events offer **Create Note** and **Link Note** when unlinked. Linked items offer **Open Note**, **Change Link**, and **Unlink** in their editor or event details.
 - Linking, changing a link, or unlinking returns to the previous planner section. **Unlink** only removes the association; it does not delete the note file.
+- **SNFolio never deletes notes.** Deleting an event or task deletes only that item and unlinks its note, whether you linked the note or SNFolio created it. The note stays in its folder; delete it in Files if you no longer need it. Deleting an event or task that has a note first asks you to confirm, and says the note will be kept. For an event, the sheet also offers **Unlink the note, keep the event**, which makes Create Note ask Meeting or Class again.
+- Versions before 0.1.24 could queue a replaced note for deletion. **⚙ → Connections & Settings → Help & Setup → Check Queued Notes** shows anything still queued, and **Keep These Notes** clears the queue without touching the files.
 
 To create a new note:
 - Tap an event and choose **Create Note**. Taller Day View blocks also show the command directly. For a task, edit it or use its note action in **All Tasks**.

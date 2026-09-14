@@ -1,4 +1,3 @@
-import {startFloatingLauncher} from './src/supernote/floatingLauncher';
 import {AppRegistry, Image} from 'react-native';
 import App from './App';
 import {name as appName} from './app.json';
@@ -17,7 +16,6 @@ const ALL_LASSO_DATA_TYPES = [0, 1, 2, 3, 4, 5];
 AppRegistry.registerComponent(appName, () => App);
 
 PluginManager.init();
-startFloatingLauncher();
 
 // Both buttons register at startup, not from inside a React component — a
 // component-scoped registration only exists while the plugin panel is open,

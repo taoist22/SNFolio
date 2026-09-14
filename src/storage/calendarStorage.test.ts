@@ -731,10 +731,15 @@ describe('storage failure isolation', () => {
 });
 
 describe('PARA folder moves', () => {
-  test('rewrites only SNFolio-owned paths inside the moved folder', () => {
-    const store = new CalendarStorage();
+  test('rewrites only SNFolio-owned paths inside the moved folder', async () => {
     const from = '/storage/emulated/0/Note/Clients/Acme';
     const to = '/storage/emulated/0/Note/Archive/Projects/Acme';
+    // Only versions before 0.1.24 queued note deletions; seed one as they left it,
+    // on otherwise empty storage so earlier tests' saved data does not load too.
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('@sn-calendar/pendingNoteDeletes', JSON.stringify([`${from}/Old.note`]));
+    const store = new CalendarStorage();
+    await store.load();
     const createdAt = new Date('2026-08-30T12:00:00Z');
 
     store.upsertArea({ id: 'area', name: 'Clients', folder: '/storage/emulated/0/Note/Clients', createdAt });
@@ -747,8 +752,6 @@ describe('PARA folder moves', () => {
       eventUid: 'event', seriesId: 'series', notePath: `${from}/Meetings/Kickoff.note`,
       lastPageNum: 1, lastCreatedIso: createdAt.toISOString(),
     });
-    store.queueNoteDeletion(`${from}/Old.note`);
-
     store.rewritePathPrefix(from, to);
 
     expect(store.getProjects()[0].folder).toBe(to);
@@ -760,6 +763,22 @@ describe('PARA folder moves', () => {
     expect(store.getMapping('series')?.notePath).toBe(`${to}/Meetings/Kickoff.note`);
     expect(store.getPendingNoteDeletions()).toEqual([`${to}/Old.note`]);
     expect(store.getAreas()[0].folder).toBe('/storage/emulated/0/Note/Clients');
+  });
+
+  test('keeping queued notes empties the old deletion queue on disk', async () => {
+    await AsyncStorage.clear();
+    await AsyncStorage.setItem('@sn-calendar/pendingNoteDeletes', JSON.stringify(['/storage/emulated/0/Note/Keep.note']));
+    const store = new CalendarStorage();
+    await store.load();
+    expect(store.getPendingNoteDeletions()).toEqual(['/storage/emulated/0/Note/Keep.note']);
+
+    await expect(store.clearPendingNoteDeletions()).resolves.toBe('');
+    expect(store.getPendingNoteDeletions()).toEqual([]);
+    expect(JSON.parse((await AsyncStorage.getItem('@sn-calendar/pendingNoteDeletes')) || 'null')).toEqual([]);
+
+    const reloaded = new CalendarStorage();
+    await reloaded.load();
+    expect(reloaded.getPendingNoteDeletions()).toEqual([]);
   });
 
   test('does not rewrite sibling folders with the same prefix', () => {

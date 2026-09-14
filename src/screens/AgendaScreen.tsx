@@ -1,6 +1,4 @@
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
-import { captureCurrentNote, rememberNote } from '../supernote/recentNotes';
-import { exitFolio, minimizeFolio, removeFloatingIcon, registerQuickAdd, registerRecentNotes, showFloatingIcon, handleToolbarLauncher } from '../supernote/floatingLauncher';
 import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import { SettingChoice } from './SettingChoice';
 import { TimeFormatContext } from './TimeFormatContext';
@@ -81,7 +79,7 @@ import {
   taskSourceCollection,
   taskToCaldavItem,
 } from '../domain/taskSync';
-import { TOOLBAR_BUTTON_ID, LASSO_BUTTON_ID, LASSO_PRESS_EVENT } from '../domain/buttonIds';
+import { LASSO_BUTTON_ID, LASSO_PRESS_EVENT } from '../domain/buttonIds';
 import { parseCapturedText, resolveDateOrder, ParsedCapture } from '../domain/captureParser';
 import { captureLassoText } from '../supernote/lassoCapture';
 import { MonthGridView } from './MonthGridView';
@@ -97,7 +95,6 @@ import { dailyFocusTasks, plannerWeekRange, projectsNeedingAttention } from '../
 import { WeeklyReviewView } from './WeeklyReviewView';
 import { CalendarWeekView } from './CalendarWeekView';
 import { FolderPickerModal } from './FolderPickerModal';
-import { FileBrowserModal } from './FileBrowserModal';
 import { CreateEventNoteModal, EventNoteChoice, LinkedNoteKind } from './CreateEventNoteModal';
 import { ExistingParaFoldersModal } from './ExistingParaFoldersModal';
 import {
@@ -135,7 +132,6 @@ import { EventDetailsModal } from './EventDetailsModal';
 import { DatePickerModal } from './DatePickerModal';
 import { listParaFolderEntries, moveParaFolder, openNoteInEditor, openResourceFile, ParaFolderEntry } from '../supernote/exportService';
 import {
-  ensureFileDeletePermission,
   ensureFileReadPermission,
   ensureInternetPermission,
 } from '../supernote/pluginPermissions';
@@ -173,15 +169,6 @@ const STRIP_TASK_LIMIT = 4;
  * button and its output disappear; nothing else depends on it.
  */
 const SHOW_DEV_PROBE = false;
-
-/**
- * Beat between deleting a file and opening a note.
- *
- * deleteFile navigates to the containing folder, so the open intent has to
- * land after that navigation to win. sn-shelf uses 180ms for the same class of
- * ordering problem; this is the number to tune if the folder ends up on top.
- */
-const DELETE_BEFORE_OPEN_DELAY_MS = 200;
 
 const CALDAV_WINDOW_PAST_DAYS = 30;
 const CALDAV_WINDOW_FUTURE_DAYS = 365;
@@ -234,21 +221,6 @@ export function AgendaScreen(): React.JSX.Element {
   const [showCalendarMenu, setShowCalendarMenu] = useState<boolean>(false);
   const [showAppMenu, setShowAppMenu] = useState<boolean>(false);
   const [showDateActionSheet, setShowDateActionSheet] = useState<boolean>(false);
-  const [recentNotesVisible, setRecentNotesVisible] = useState(false);
-  const [showFileBrowser, setShowFileBrowser] = useState(false);
-  const [recentNotes, setRecentNotes] = useState<string[]>([]);
-  useEffect(() => registerRecentNotes(() => {
-    setRecentNotes(calendarStorage.getSettings().recentNotePaths || []);
-    setRecentNotesVisible(true);
-  }), []);
-  const [floatingEnabled, setFloatingEnabled] = useState(false);
-  const quickAddActive = useRef(false);
-  useEffect(() => registerQuickAdd(() => {
-    quickAddActive.current = true;
-    setEditingEvent(null); setEditingTask(null);
-    setLassoDraftTitle(''); setLassoDraftParsed(null); setLassoDraftDate(new Date());
-    setPendingProjectId(undefined); setCreationType('task'); setShowItemCreationModal(true);
-  }), []);
   const [showItemCreationModal, setShowItemCreationModal] = useState<boolean>(false);
   const [creationType, setCreationType] = useState<'event' | 'task'>('event');
 
@@ -341,6 +313,10 @@ export function AgendaScreen(): React.JSX.Element {
   const [editingTask, setEditingTask] = useState<CalendarTask | null>(null);
   /** Confirms whether an event's generated note goes with it. */
   const [showDeleteNoteModal, setShowDeleteNoteModal] = useState<boolean>(false);
+  /** A task with a linked note awaiting confirmation that only the task is deleted. */
+  const [pendingDeleteNoteTask, setPendingDeleteNoteTask] = useState<CalendarTask | null>(null);
+  /** Help & Setup: what a pre-0.1.24 version left queued for deletion; null until checked. */
+  const [queuedNoteDeletions, setQueuedNoteDeletions] = useState<{ path: string; exists: boolean }[] | null>(null);
   const [showTaskList, setShowTaskList] = useState<boolean>(false);
   const [areas, setAreas] = useState<Area[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -391,9 +367,6 @@ export function AgendaScreen(): React.JSX.Element {
     if (cancelled) return;
 
     const settings = calendarStorage.getSettings();
-    setFloatingEnabled(Boolean(settings.floatingLauncherEnabled));
-    await captureCurrentNote();
-    void showFloatingIcon().catch(error => setStatusMsg(String(error?.message || error)));
     if (settings.taskCaldavCollectionUrl && !settings.taskCaldavLocalEnrollmentDone) {
       calendarStorage.excludeDeviceOnlyTasksFromSync();
       calendarStorage.updateSettings({ taskCaldavLocalEnrollmentDone: true });
@@ -462,11 +435,6 @@ export function AgendaScreen(): React.JSX.Element {
       if (PluginManager && PluginManager.registerButtonListener) {
         PluginManager.registerButtonListener({
           onButtonPress: async (msg: any) => {
-            if (msg?.id === TOOLBAR_BUTTON_ID) {
-              quickAddActive.current = false;
-              await handleToolbarLauncher();
-              return;
-            }
             // The SDK sends { id, name, icon, pressEvent }. The previous guard
             // tested msg.action and msg.buttonId — neither field exists, so it
             // returned on every press and the handler never ran.
@@ -602,7 +570,7 @@ export function AgendaScreen(): React.JSX.Element {
 
   const handleClosePlugin = () => {
     try {
-      void exitFolio();
+      PluginManager.closePluginView();
     } catch (e) {}
   };
 
@@ -1938,13 +1906,6 @@ export function AgendaScreen(): React.JSX.Element {
       // waiting for the next existence sweep.
       setEventNotePaths(prev => ({ ...prev, [event.uid]: result.notePath }));
 
-      // The replacement exists, so the old file can go now. Its folder
-      // navigation is about to be overwritten by opening this note.
-      const removed = await flushPendingNoteDeletions();
-      if (removed > 0) {
-        await new Promise<void>(resolve => setTimeout(() => resolve(), DELETE_BEFORE_OPEN_DELAY_MS));
-      }
-
       // Open it the way daily notes do — through the native intent. The service
       // used to call openFilePath, which drops you in the file manager.
       // Open the page just created. Omitting pageNum reopens the notebook on
@@ -2377,6 +2338,15 @@ export function AgendaScreen(): React.JSX.Element {
     setShowItemCreationModal(true);
   };
 
+  /** Same rule as events: a task with a linked note asks first, and the note is always kept. */
+  const requestDeleteTask = (task: CalendarTask) => {
+    if (calendarStorage.getMapping(task.uid)?.notePath) {
+      setPendingDeleteNoteTask(task);
+      return;
+    }
+    void handleDeleteTask(task);
+  };
+
   const handleDeleteTask = async (task: CalendarTask) => {
     const settings = calendarStorage.getSettings();
     let remoteError = '';
@@ -2419,17 +2389,25 @@ export function AgendaScreen(): React.JSX.Element {
       setStatusMsg(`Could not delete task "${task.title}" from CalDAV: ${remoteError}`);
       return;
     }
+    const taskNoteName = calendarStorage.getMapping(task.uid)?.notePath?.split('/').pop();
     calendarStorage.removeTask(task.uid);
+    if (taskNoteName) {
+      calendarStorage.unlinkMapping(task.uid);
+      setMembershipRevision(value => value + 1);
+    }
     if (sourceCollection && matchingAccountActive) {
       calendarStorage.forgetTaskPush(task.uid, sourceCollection);
     }
     setTasks([...calendarStorage.getTasks()]);
+    const keptNote = taskNoteName
+      ? ` Its note "${taskNoteName}" was kept — delete it in Files if you no longer need it.`
+      : '';
     setStatusMsg(
-      sourceCollection && matchingAccountConfigured && !matchingAccountActive
+      (sourceCollection && matchingAccountConfigured && !matchingAccountActive
         ? `Deleted task "${task.title}" locally. Its server deletion is queued for the matching account.`
         : sourceCollection && !matchingAccountConfigured
           ? `Deleted task "${task.title}" locally. Its source account is not configured, so the server was unchanged.`
-        : `Deleted task "${task.title}".`
+        : `Deleted task "${task.title}".`) + keptNote
     );
   };
 
@@ -2470,12 +2448,8 @@ export function AgendaScreen(): React.JSX.Element {
    * filename — and the caller confirms first.
    */
   /**
-   * Unlinks a note from its event and queues the file for removal.
-   *
-   * Nothing is destroyed yet: the file goes once the replacement note is
-   * opened, so the folder navigation deleteFile performs is hidden behind a
-   * navigation the user asked for. If no replacement is ever made, the queue
-   * survives a restart and is flushed the next time any note opens.
+   * Unlinks a note from its event. The file is never deleted: SNFolio cannot
+   * recreate a note, so removing one is left to the user in Files.
    */
   const unlinkNoteForEvent = (event: CalendarEvent): string | null => {
     const identity = noteIdentity(event);
@@ -2483,7 +2457,6 @@ export function AgendaScreen(): React.JSX.Element {
     const path = mapping?.notePath;
     if (!path) return null;
 
-    calendarStorage.queueNoteDeletion(path);
     calendarStorage.setMapping({ ...mapping, notePath: '' });
     calendarStorage.clearEventKind(identity);
 
@@ -2498,69 +2471,6 @@ export function AgendaScreen(): React.JSX.Element {
       return next;
     });
     return path;
-  };
-
-  /**
-   * Removes anything queued. Called immediately before opening a note, so the
-   * folder deleteFile navigates to is replaced by the note a moment later.
-   */
-  const flushPendingNoteDeletions = async (): Promise<number> => {
-    const queued = [...calendarStorage.getPendingNoteDeletions()];
-    if (queued.length === 0) return 0;
-    if (!(await ensureFileDeletePermission())) return 0;
-
-    let removed = 0;
-    for (const path of queued) {
-      try {
-        if (!FileUtils.deleteFile) break;
-        const gone = await FileUtils.deleteFile(path);
-        // A file already absent counts as done; leaving it queued forever
-        // would delay every note open from here on.
-        if (gone !== false) {
-          calendarStorage.clearPendingNoteDeletion(path);
-          removed++;
-        }
-      } catch (e) {
-        // Left queued: the Note app may have it open. Next time, then.
-      }
-    }
-    return removed;
-  };
-
-  const deleteNoteForEvent = async (event: CalendarEvent): Promise<string | null> => {
-    const mapping = calendarStorage.getMapping(noteIdentity(event));
-    const path = mapping?.notePath;
-    if (!path) return null;
-    if (!(await ensureFileDeletePermission())) return null;
-
-    try {
-      // Reported as a failure rather than skipped silently: clearing the
-      // mapping while the file remained would claim a deletion that never
-      // happened, and the note would still be sitting in the folder.
-      if (!FileUtils.deleteFile) return null;
-
-      const removed = await FileUtils.deleteFile(path);
-      if (removed === false) return null;
-
-      calendarStorage.setMapping({ ...mapping, notePath: '' });
-      // The recorded kind goes with the note. Without this a wrong answer to
-      // the Meeting-or-Class prompt could never be corrected: the prompt only
-      // fires when nothing is recorded.
-      calendarStorage.clearEventKind(noteIdentity(event));
-      setNoteKindByEvent(prev => {
-        const next = { ...prev };
-        delete next[noteIdentity(event)];
-        return next;
-      });
-      setEventNotePaths(prev => {
-        const next = { ...prev };
-        delete next[event.uid];
-        return next;
-      });
-      return path;
-    } catch (e) {
-      return null;
-    }
   };
 
   const removeEventEverywhere = async (event: CalendarEvent): Promise<string> => {
@@ -2587,46 +2497,59 @@ export function AgendaScreen(): React.JSX.Element {
     return '';
   };
 
-  const handleConfirmDeleteWithNote = async (choice: 'both' | 'event' | 'note') => {
+  const handleConfirmDeleteWithNote = async (choice: 'event' | 'note') => {
     const event = pendingDeleteEvent;
     setShowDeleteNoteModal(false);
     setPendingDeleteEvent(null);
     if (!event) return;
 
     if (choice === 'event') {
+      const noteName = calendarStorage.getMapping(noteIdentity(event))?.notePath?.split('/').pop();
       const error = await removeEventEverywhere(event);
-      setStatusMsg(error
-        ? `Could not delete "${event.summary}" from CalDAV: ${error}`
-        : `Deleted "${event.summary}". Its note was kept.`);
+      if (error) {
+        setStatusMsg(`Could not delete "${event.summary}" from CalDAV: ${error}`);
+        return;
+      }
+      unlinkNoteForEvent(event);
+      setStatusMsg(noteName
+        ? `Deleted "${event.summary}". Its note "${noteName}" was kept — delete it in Files if you no longer need it.`
+        : `Deleted "${event.summary}".`);
       return;
     }
 
-    if (choice === 'note') {
-      // Unlinked rather than deleted on the spot: the file goes when the
-      // replacement note opens, so deleteFile's jump to the folder is hidden
-      // behind a navigation the user actually wanted.
-      const unlinked = unlinkNoteForEvent(event);
-      setStatusMsg(
-        unlinked
-          ? `Note unlinked. Create Note will ask again — the old file is removed when the new note opens.`
-          : `No note to remove for "${event.summary}".`
-      );
-      return;
-    }
-
-    const remoteError = await removeEventEverywhere(event);
-    if (remoteError) {
-      setStatusMsg(`Nothing was deleted because CalDAV rejected the event deletion: ${remoteError}`);
-      return;
-    }
-    const removedNote = await deleteNoteForEvent(event);
-    // A failed delete used to report identically to a chosen keep, so a locked
-    // file looked like the user's own decision.
+    // Unlinking is how a wrong Meeting-or-Class answer gets fixed: the recorded
+    // kind goes with the link, so Create Note asks again. The file stays.
+    const unlinked = unlinkNoteForEvent(event);
     setStatusMsg(
-      removedNote
-        ? `Deleted "${event.summary}" and its note.`
-        : `Deleted "${event.summary}", but its note could not be removed — close it in the Note app first.`
+      unlinked
+        ? `Note "${unlinked.split('/').pop()}" unlinked and kept. Create Note will ask Meeting or Class again.`
+        : `No note is linked to "${event.summary}".`
     );
+  };
+
+  const handleCheckQueuedNoteDeletions = async () => {
+    const paths = [...calendarStorage.getPendingNoteDeletions()];
+    const canRead = paths.length > 0 && (await ensureFileReadPermission());
+    const entries: { path: string; exists: boolean }[] = [];
+    // One at a time: concurrent native file calls have frozen the device before.
+    for (const path of paths) {
+      let exists = false;
+      try {
+        exists = canRead && Boolean(await FileUtils.exists(path));
+      } catch (e) {}
+      entries.push({ path, exists });
+    }
+    setQueuedNoteDeletions(entries);
+  };
+
+  const handleKeepQueuedNotes = async () => {
+    const error = await calendarStorage.clearPendingNoteDeletions();
+    if (error) {
+      setStatusMsg(`Could not clear the deletion queue: ${error}`);
+      return;
+    }
+    setQueuedNoteDeletions([]);
+    setStatusMsg('Queued notes kept. SNFolio will not delete them.');
   };
 
   const handleDeleteItem = async (event: CalendarEvent) => {
@@ -3702,7 +3625,9 @@ export function AgendaScreen(): React.JSX.Element {
    * looks like the tap did nothing.
    */
   const closePanel = () => {
-    void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
+    try {
+      PluginManager.closePluginView();
+    } catch (e) {}
   };
 
   /**
@@ -3728,50 +3653,12 @@ export function AgendaScreen(): React.JSX.Element {
 
   const handleOpenExistingNote = async (notePath: string) => {
     setShowDateActionSheet(false);
-    // Catches anything unlinked and then abandoned: the user is navigating
-    // away regardless, so this is the free moment to remove it.
-    const removed = await flushPendingNoteDeletions();
-    if (removed > 0) {
-      await new Promise<void>(resolve => setTimeout(() => resolve(), DELETE_BEFORE_OPEN_DELAY_MS));
-    }
     await prepareForNativeFileOpen();
     const res = await openNoteInEditor(notePath);
     setStatusMsg(res.message);
     if (res.success) {
-      rememberNote(notePath);
-      setRecentNotesVisible(false);
       closePanel();
     }
-  };
-
-  /** Recent Files entry: notes keep the note opener; PDFs and EPUBs use the document opener. */
-  const handleOpenRecentFile = async (path: string) => {
-    if (path.toLowerCase().endsWith('.note')) {
-      await handleOpenExistingNote(path);
-      return;
-    }
-    await prepareForNativeFileOpen();
-    const opened = await openResourceFile(path);
-    setStatusMsg(opened.message);
-    if (opened.success) {
-      rememberNote(path);
-      setRecentNotesVisible(false);
-      closePanel();
-    }
-  };
-
-  /**
-   * A file chosen in the in-panel browser opens exactly like a Recent Files
-   * entry: launch it, then close SNFolio so it comes to the front.
-   */
-  const handleOpenBrowsedFile = async (path: string) => {
-    await prepareForNativeFileOpen();
-    const opened = await openResourceFile(path);
-    if (!opened.success) throw new Error(opened.message);
-    setStatusMsg(opened.message);
-    rememberNote(path); // Only notes, PDFs, and EPUBs are kept.
-    setShowFileBrowser(false);
-    closePanel();
   };
 
   const handleFetchFeedUrl = async () => {
@@ -4004,12 +3891,6 @@ export function AgendaScreen(): React.JSX.Element {
                 ⚙ {showSettings ? 'Close Settings' : 'Connections & Settings'}
               </Text>
             </TouchableOpacity>
-            {floatingEnabled && <TouchableOpacity style={styles.actionSheetBtn} onPress={() => {
-              setShowAppMenu(false);
-              void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
-            }}>
-              <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Minimize</Text>
-            </TouchableOpacity>}
             <TouchableOpacity style={styles.deleteOptionBtnDanger} onPress={() => {
               setShowAppMenu(false);
               handleClosePlugin();
@@ -4144,6 +4025,46 @@ export function AgendaScreen(): React.JSX.Element {
       {/* Deleting an event that generated a note. Handwritten pages cannot be
           recovered and there is no undo, so the file is named and keeping it
           is offered as a first-class choice rather than a cancel. */}
+      <Modal visible={pendingDeleteNoteTask !== null} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setPendingDeleteNoteTask(null)}
+        >
+          <View style={styles.actionSheetContentCompact}>
+            <Text allowFontScaling={false} style={styles.actionSheetTitle}>Delete…</Text>
+            <Text allowFontScaling={false} style={styles.bodyTextCenter} numberOfLines={2}>
+              "{pendingDeleteNoteTask?.title}"
+            </Text>
+            <Text allowFontScaling={false} style={styles.previewHint}>
+              Only the task is deleted. The note stays in its folder — delete it in Files
+              if you no longer need it.
+            </Text>
+            <Text allowFontScaling={false} style={styles.previewHint}>
+              It has a note:{' '}
+              {pendingDeleteNoteTask
+                ? calendarStorage.getMapping(pendingDeleteNoteTask.uid)?.notePath?.split('/').pop()
+                : ''}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.deleteOptionBtnDanger}
+              onPress={() => {
+                const task = pendingDeleteNoteTask;
+                setPendingDeleteNoteTask(null);
+                if (task) void handleDeleteTask(task);
+              }}
+            >
+              <Text allowFontScaling={false} style={styles.deleteOptionBtnTextDanger}>🗑️ Delete the task, keep the note</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setPendingDeleteNoteTask(null)}>
+              <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal visible={showDeleteNoteModal} transparent animationType="fade">
         <TouchableOpacity
           style={styles.modalOverlay}
@@ -4159,9 +4080,8 @@ export function AgendaScreen(): React.JSX.Element {
               "{pendingDeleteEvent?.summary}"
             </Text>
             <Text allowFontScaling={false} style={styles.previewHint}>
-              Replacing unlinks the note now and removes the file when its replacement opens.
-              Deleting outright leaves the plugin and shows the folder — that is the device's
-              own behaviour, and the deletion still happens.
+              Only the event is deleted. The note stays in its folder — delete it in Files
+              if you no longer need it.
             </Text>
             <Text allowFontScaling={false} style={styles.previewHint}>
               It has a note:{' '}
@@ -4173,28 +4093,20 @@ export function AgendaScreen(): React.JSX.Element {
                 : ''}
             </Text>
 
-            {/* Deleting only the note is how a wrong Meeting-or-Class answer
-                gets fixed: the recorded kind goes with the note, so Create
-                Note asks again, and the event itself is untouched. */}
+            <TouchableOpacity
+              style={styles.deleteOptionBtnDanger}
+              onPress={() => handleConfirmDeleteWithNote('event')}
+            >
+              <Text allowFontScaling={false} style={styles.deleteOptionBtnTextDanger}>🗑️ Delete the event, keep the note</Text>
+            </TouchableOpacity>
+
+            {/* Unlinking is how a wrong Meeting-or-Class answer gets fixed:
+                Create Note asks again, and neither event nor file is removed. */}
             <TouchableOpacity
               style={styles.deleteOptionBtn}
               onPress={() => handleConfirmDeleteWithNote('note')}
             >
-              <Text allowFontScaling={false} style={styles.deleteOptionBtnText}>📝 Replace the note, keep the event</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.deleteOptionBtn}
-              onPress={() => handleConfirmDeleteWithNote('event')}
-            >
-              <Text allowFontScaling={false} style={styles.deleteOptionBtnText}>🗑️ Delete the event, keep the note</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.deleteOptionBtnDanger}
-              onPress={() => handleConfirmDeleteWithNote('both')}
-            >
-              <Text allowFontScaling={false} style={styles.deleteOptionBtnTextDanger}>🗑️ Delete both</Text>
+              <Text allowFontScaling={false} style={styles.deleteOptionBtnText}>🔗 Unlink the note, keep the event</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -5063,13 +4975,6 @@ export function AgendaScreen(): React.JSX.Element {
 
           {settingsTab === 'app' && (
             <>
-          <SettingChoice label="Floating SNFolio icon" value={floatingEnabled} onChange={enabled => {
-            setFloatingEnabled(enabled);
-            calendarStorage.updateSettings({ floatingLauncherEnabled: enabled });
-            if (!enabled) void removeFloatingIcon();
-            else void showFloatingIcon().catch(error => setStatusMsg(String(error?.message || error)));
-          }} />
-          <Text allowFontScaling={false} style={styles.bodyText}>Use Minimize to return to your note. Tap the icon in a note or document to reopen SNFolio, or hold it there for Quick Add. Inside SNFolio, tap it for Recent Files and Browse Files. Drag to move it. Exit removes the icon.</Text>
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Event Types</Text>
           <Text allowFontScaling={false} style={styles.bodyText}>
             What kinds of event you have — Class, Work, Personal. Each carries where its notes are
@@ -5301,6 +5206,30 @@ export function AgendaScreen(): React.JSX.Element {
 
           {settingsTab === 'help' && (
             <>
+          <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Notes Queued for Deletion</Text>
+          <Text allowFontScaling={false} style={styles.bodyText}>
+            SNFolio no longer deletes notes. Versions before 0.1.24 could queue a replaced note for
+            deletion; check whether any are still queued and keep them.
+          </Text>
+          <TouchableOpacity style={styles.actionSheetBtn} onPress={() => void handleCheckQueuedNoteDeletions()}>
+            <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Check Queued Notes</Text>
+          </TouchableOpacity>
+          {queuedNoteDeletions && queuedNoteDeletions.length === 0 && (
+            <Text allowFontScaling={false} style={styles.bodyText}>No notes are queued for deletion.</Text>
+          )}
+          {queuedNoteDeletions && queuedNoteDeletions.length > 0 && (
+            <>
+              {queuedNoteDeletions.map(entry => (
+                <Text key={entry.path} allowFontScaling={false} style={styles.bodyText}>
+                  {entry.exists ? '📄 ' : 'Not found: '}{entry.path}
+                </Text>
+              ))}
+              <TouchableOpacity style={styles.actionSheetBtn} onPress={() => void handleKeepQueuedNotes()}>
+                <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Keep These Notes</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Start Here</Text>
           <View style={styles.hintBox}>
             <Text allowFontScaling={false} style={styles.hintTitle}>1. Choose only what you need</Text>
@@ -5545,41 +5474,6 @@ export function AgendaScreen(): React.JSX.Element {
             }}
           />
 
-          <Modal visible={recentNotesVisible} transparent animationType="none" onRequestClose={() => setRecentNotesVisible(false)}>
-            <View style={styles.recentNotesOverlay}>
-              <View style={styles.recentNotesCard}>
-                <Text allowFontScaling={false} style={styles.sectionTitle}>Recent Files</Text>
-                <Text allowFontScaling={false} style={styles.bodyText}>Notes, PDFs, and EPUBs visited through SNFolio or open when you returned to it.</Text>
-                {/* Two columns, filled across rows so the newest files stay on top. */}
-                <ScrollView style={styles.recentNotesList} contentContainerStyle={styles.recentFilesGrid}>
-                  {recentNotes.length === 0 && <Text allowFontScaling={false} style={[styles.bodyText, styles.recentFilesEmpty]}>No recent files yet. Open a note or document and return to SNFolio to add it here.</Text>}
-                  {recentNotes.map(path => <TouchableOpacity key={path} style={[styles.actionSheetBtn, styles.recentFileTile]} onPress={() => {
-                    setRecentNotesVisible(false);
-                    void handleOpenRecentFile(path);
-                  }}>
-                    <Text allowFontScaling={false} style={styles.actionSheetBtnText} numberOfLines={1}>{path.split('/').pop()?.replace(/\.note$/i, '')}</Text>
-                    <Text allowFontScaling={false} style={styles.bodyText} numberOfLines={1}>{path.split('/').slice(0, -1).join('/')}</Text>
-                  </TouchableOpacity>)}
-                </ScrollView>
-                <View style={styles.recentFilesActions}>
-                  <TouchableOpacity style={[styles.actionSheetBtn, styles.recentFilesAction]} onPress={() => { setRecentNotesVisible(false); setShowFileBrowser(true); }}>
-                    <Text allowFontScaling={false} style={styles.actionSheetBtnText}>📂 Browse Files…</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.cancelBtn, styles.recentFilesAction]} onPress={() => setRecentNotesVisible(false)}>
-                    <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          </Modal>
-
-          <FileBrowserModal
-            visible={showFileBrowser}
-            initialPath="/storage/emulated/0"
-            onCancel={() => setShowFileBrowser(false)}
-            onOpenFile={handleOpenBrowsedFile}
-          />
-
           <ItemCreationModal
             visible={showItemCreationModal}
             type={creationType}
@@ -5591,10 +5485,6 @@ export function AgendaScreen(): React.JSX.Element {
             availableFeeds={calendarStorage.getSettings().feeds}
             onClose={() => {
               setShowItemCreationModal(false);
-              if (quickAddActive.current) {
-                quickAddActive.current = false;
-                void minimizeFolio().catch(error => setStatusMsg(String(error?.message || error)));
-              }
               setLassoDraftTitle('');
               setLassoDraftParsed(null);
               setLassoDraftDate(null);
@@ -5650,7 +5540,7 @@ export function AgendaScreen(): React.JSX.Element {
             onCreateProject={handleCreateProject}
             onDeleteTask={uid => {
               const task = calendarStorage.getTasks().find(t => t.uid === uid);
-              if (task) void handleDeleteTask(task);
+              if (task) requestDeleteTask(task);
             }}
           />
 
@@ -6053,7 +5943,7 @@ export function AgendaScreen(): React.JSX.Element {
 
                                 <TouchableOpacity
                                   style={styles.focusTaskDelete}
-                                  onPress={() => handleDeleteTask(task)}
+                                  onPress={() => requestDeleteTask(task)}
                                 >
                                   <Text allowFontScaling={false} style={styles.focusTaskDeleteText}>✕</Text>
                                 </TouchableOpacity>
@@ -6144,15 +6034,6 @@ export function AgendaScreen(): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  recentNotesOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
-  recentNotesCard: { width: '85%', maxHeight: '80%', padding: 16, borderWidth: 2, borderColor: '#000', backgroundColor: '#fff' },
-  recentNotesList: { flexShrink: 1, marginVertical: 10 },
-  recentFilesGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  recentFilesEmpty: { width: '100%' },
-  recentFileTile: { width: '48.5%', paddingHorizontal: 8 },
-  recentFilesActions: { flexDirection: 'row', justifyContent: 'space-between' },
-  // Same height for both buttons, whatever their border and padding.
-  recentFilesAction: { width: '48.5%', minHeight: 44, justifyContent: 'center', marginBottom: 0 },
   root: {
     flex: 1,
     backgroundColor: '#ffffff',

@@ -228,12 +228,11 @@ export class CalendarStorage {
    */
   private membership: Record<string, ItemMembership> = {};
   /**
-   * Note files unlinked from their event but not yet removed from disk.
+   * Note files queued for deletion by versions before 0.1.24.
    *
-   * deleteFile navigates to the containing folder, so deleting at the moment
-   * the user asks would throw them out of the plugin. Deferring it until the
-   * replacement note is opened hides that navigation behind one they wanted.
-   * Persisted so an abandoned replacement still gets cleaned up later.
+   * SNFolio no longer deletes note files and nothing adds to this list. It is
+   * still loaded so Help & Setup can show what an older version queued and the
+   * user can keep those notes by clearing it.
    */
   private pendingDeletes: string[] = [];
   private loaded = false;
@@ -827,20 +826,14 @@ export class CalendarStorage {
     void this.save();
   }
 
-  /** Queues a note file for removal once the user is next navigating anyway. */
-  queueNoteDeletion(path: string): void {
-    if (!path || this.pendingDeletes.includes(path)) return;
-    this.pendingDeletes.push(path);
-    void this.save();
-  }
-
   getPendingNoteDeletions(): string[] {
     return this.pendingDeletes;
   }
 
-  clearPendingNoteDeletion(path: string): void {
-    this.pendingDeletes = this.pendingDeletes.filter(p => p !== path);
-    void this.save();
+  /** Keeps every queued note: empties the list without touching the files. */
+  async clearPendingNoteDeletions(): Promise<string> {
+    this.pendingDeletes = [];
+    return this.flush();
   }
 
   getAllMemberships(): Record<string, ItemMembership> {

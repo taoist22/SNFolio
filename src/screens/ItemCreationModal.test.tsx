@@ -24,7 +24,7 @@ test.each(['task', 'event'] as const)('new %s holds a selected note until Save',
 });
 
 test.each(['task', 'event'] as const)('saving a new %s records it before the form closes', type => {
-  // Quick Add closes SNFolio from onClose, so the item must already be stored by then.
+  // onClose can dismiss the form (and the panel), so the item must already be stored by then.
   const order: string[] = [];
   const createTask = jest.fn(() => order.push('create')), createEvent = jest.fn(() => order.push('create')), close = jest.fn(() => order.push('close'));
   let tree: TestRenderer.ReactTestRenderer;

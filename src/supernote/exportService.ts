@@ -1,4 +1,3 @@
-import { rememberNote } from './recentNotes';
 import { NativeModules } from 'react-native';
 import { FileUtils } from 'sn-plugin-lib';
 import {
@@ -168,12 +167,6 @@ export async function listParaFolderEntries(folder: string): Promise<ParaFolderE
  * activity directly instead.
  */
 export async function openNoteInEditor(path: string, page = 0): Promise<ExportResult> {
-  const result = await openNoteInEditorInternal(path, page);
-  if (result.success) rememberNote(path);
-  return result;
-}
-
-async function openNoteInEditorInternal(path: string, page = 0): Promise<ExportResult> {
   if (!(await ensureFileReadPermission())) {
     return { success: false, path, message: 'File access was not allowed.' };
   }
