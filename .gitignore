@@ -9,3 +9,6 @@ coverage/
 
 # Machine-specific SDK path; never committed.
 android/local.properties
+
+# Local AI build protocol (not published)
+AGENTS.md
