@@ -3,6 +3,7 @@ import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderForDate, 
 import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
 import { useWorkspaceActivity } from './useWorkspaceActivity';
 import { WorkspaceBackupPanel } from './WorkspaceBackupPanel';
+import { BulkFileItem, BulkFilePanel } from './BulkFilePanel';
 import { autoBackupDue, createAutoBackup, localDayKey } from '../supernote/workspaceBackupService';
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
 import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
@@ -94,7 +95,7 @@ import { ParaView } from './ParaView';
 import { ProjectDetailView } from './ProjectDetailView';
 import { moveActiveProject, projectProgress } from '../domain/taskListView';
 import { fetchCalendarFeed, normaliseFeedUrl, refreshCalendarFeeds } from '../domain/feedService';
-import { autoFileProject, autoFileWords } from '../domain/autoFile';
+import { autoFileProject, autoFileWords, feedProject } from '../domain/autoFile';
 import { eventNoteKey, eventNoteMapping } from '../domain/eventNoteMapping';
 import { isIcsCalendarContent, parseCalendarSetupFile } from '../domain/calendarImport';
 import { projectDisplayLabel } from '../domain/projectLabel';
@@ -256,6 +257,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [allParsedEvents, setAllParsedEvents] = useState<CalendarEvent[]>([]);
   const [calendarFeeds, setCalendarFeeds] = useState<CalendarFeed[]>([]);
+  const [feedProjectPicker, setFeedProjectPicker] = useState<string | null>(null);
+  const [bulkFileFeed, setBulkFileFeed] = useState<CalendarFeed | null>(null);
   /**
    * Whether an imported or subscribed feed is configured. Drives the Sync Now
    * button for feed-only setups.
@@ -749,9 +752,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    * a Project or Area, or once auto-filed and since unfiled by hand, are left.
    */
   const applyAutoFiling = (events: CalendarEvent[]): number => {
-    const candidates = calendarStorage.getProjects()
+    const allProjects = calendarStorage.getProjects();
+    const feeds = calendarStorage.getSettings().feeds;
+    const candidates = allProjects
       .filter(project => project.status === 'active' && autoFileWords(project.autoFileMatch).length > 0);
-    if (!candidates.length) return 0;
+    if (!candidates.length && !feeds.some(feed => feed.projectId)) return 0;
     let filed = 0;
     const seen = new Set<string>();
     for (const event of events) {
@@ -762,7 +767,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       seen.add(identity);
       const membership = calendarStorage.getMembership(identity);
       if (membership.projectId || membership.areaId || membership.autoFiledProjectId) continue;
-      const project = autoFileProject(event.summary || '', candidates);
+      // A calendar filed as a whole is the more specific rule, so it goes first.
+      const project = feedProject(event, feeds, allProjects) || autoFileProject(event, candidates);
       if (!project) continue;
       calendarStorage.setMembership(identity, { projectId: project.id, autoFiledProjectId: project.id });
       filed++;
@@ -770,6 +776,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     if (filed) setMembershipRevision(value => value + 1);
     return filed;
   };
+
+  /** Tells the user what auto-filing did with newly loaded items, so none seem to vanish into a Project. */
+  const filedSummary = (filed: number): string => (filed
+    ? ` ${filed} of them were filed under Projects by your auto-file words.`
+    : '');
 
   const handleSetAutoFileMatch = (projectId: string, words: string) => {
     const stored = calendarStorage.getProjects().find(project => project.id === projectId);
@@ -1652,8 +1663,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         setAllParsedEvents(prev => [...prev, ...evts]);
         setHasSubscribedFeeds(true);
         jumpToNextUpcomingEventFromToday(evts);
+        const filed = applyAutoFiling(evts);
         setStatusMsg(
-          `Imported ${evts.length} events from ${fileName} and retained a private plugin copy.`
+          `Imported ${evts.length} events from ${fileName} and retained a private plugin copy.${filedSummary(filed)}`
         );
         return;
       }
@@ -1709,11 +1721,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         setAllParsedEvents(prev => [...prev, ...imported]);
       }
       setRefreshState(n => n + 1);
+      const filedFromSetup = applyAutoFiling(imported);
 
       if (added > 0) {
         setHasSubscribedFeeds(true);
         setStatusMsg(
-          `Imported ${added} named feed(s), ${imported.length} events` +
+          `Imported ${added} named feed(s), ${imported.length} events${filedSummary(filedFromSetup)}` +
           `${failed > 0 ? ` — ${failed} URL(s) failed` : ''}` +
           `${setup.invalidLines > 0 ? ` — ${setup.invalidLines} invalid line(s) skipped` : ''}. ` +
           `Remove the plaintext setup file after confirming the feeds.`
@@ -4058,11 +4071,55 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       setCalendarFeeds([...updatedFeeds]);
       setNewFeedUrl('');
       newFeedInputRef.current?.setValue('');
-      setStatusMsg(`Loaded ${newEvts.length} events from feed!`);
+      const filed = applyAutoFiling(newEvts);
+      setStatusMsg(`Loaded ${newEvts.length} events from feed!${filedSummary(filed)}`);
     } catch (err: any) {
       setStatusMsg(`Failed to fetch feed: ${err?.message || 'Network error'}`);
     }
   });
+
+  /** A calendar's items not yet under a Project or Area, one entry per series, oldest first. */
+  const unfiledFeedItems = (feed: CalendarFeed): BulkFileItem[] => {
+    void membershipRevision;
+    const seen = new Set<string>();
+    const items: BulkFileItem[] = [];
+    for (const event of allParsedEvents) {
+      if (event.sourceFeedId !== feed.id || event.isTask || event.isTaskMirror) continue;
+      const identity = noteIdentity(event);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      const membership = calendarStorage.getMembership(identity);
+      if (membership.projectId || membership.areaId) continue;
+      items.push({ identity, summary: event.summary || '(No Title)', start: event.start, location: event.location, categories: event.categories });
+    }
+    return items.sort((a, b) => a.start.getTime() - b.start.getTime());
+  };
+
+  const handleBulkFile = (identities: string[], projectId: string) => {
+    const project = calendarStorage.getProjects().find(candidate => candidate.id === projectId);
+    if (!project) return;
+    const before = calendarStorage.snapshotRecords();
+    for (const identity of identities) calendarStorage.setMembership(identity, { projectId });
+    setMembershipRevision(value => value + 1);
+    setBulkFileFeed(null);
+    offerUndo(`Filed ${identities.length} item${identities.length === 1 ? '' : 's'} under ${project.name}.`, 'the filing', before);
+  };
+
+  /** Files every item from one calendar under a Project, or stops doing so (filed items stay filed). */
+  const handleSetFeedProject = (feed: CalendarFeed, projectId?: string) => {
+    const feeds = calendarStorage.getSettings().feeds.map(candidate =>
+      candidate.id === feed.id ? { ...candidate, projectId } : candidate);
+    calendarStorage.updateSettings({ feeds });
+    setCalendarFeeds(feeds);
+    setFeedProjectPicker(null);
+    const project = projectId ? calendarStorage.getProjects().find(candidate => candidate.id === projectId) : undefined;
+    if (!project) {
+      setStatusMsg(`${feed.name} is no longer filed under a Project. Items already filed stay filed.`);
+      return;
+    }
+    const filed = applyAutoFiling(allParsedEvents);
+    setStatusMsg(`Everything from ${feed.name} is filed under ${project.name}: ${filed} item${filed === 1 ? '' : 's'} now, new ones as it syncs. Items you filed elsewhere are left alone.`);
+  };
 
   const handleRemoveCalendarFeed = trackWorkspaceOperation(async (feed: CalendarFeed) => {
     const updatedFeeds = calendarStorage.removeFeed(feed.id);
@@ -5129,8 +5186,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
           <Text allowFontScaling={false} style={styles.sectionTitle}>Connected Calendars</Text>
           {connectedCalendarFeeds.length === 0 ? (
             <Text allowFontScaling={false} style={styles.checkSettingHint}>No imported or subscribed calendars.</Text>
-          ) : connectedCalendarFeeds.map(feed => (
-            <View key={feed.id} style={styles.connectedFeedRow}>
+          ) : connectedCalendarFeeds.map(feed => {
+            const filedUnder = feed.projectId ? projects.find(project => project.id === feed.projectId) : undefined;
+            return (
+            <View key={feed.id}>
+            <View style={styles.connectedFeedRow}>
               <View style={styles.connectedFeedDetails}>
                 <Text allowFontScaling={false} style={styles.connectedFeedName} numberOfLines={1}>
                   {feed.name}
@@ -5138,6 +5198,18 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 <Text allowFontScaling={false} style={styles.connectedFeedKind}>
                   {feed.localPath ? 'Imported calendar file' : 'Subscribed calendar'}
                 </Text>
+                <TouchableOpacity accessibilityRole="button" style={styles.feedProjectBtn}
+                  onPress={() => setBulkFileFeed(feed)}>
+                  <Text allowFontScaling={false} style={styles.feedProjectBtnText} numberOfLines={1}>
+                    {`Review unfiled items (${unfiledFeedItems(feed).length})…`}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="button" style={styles.feedProjectBtn}
+                  onPress={() => setFeedProjectPicker(current => (current === feed.id ? null : feed.id))}>
+                  <Text allowFontScaling={false} style={styles.feedProjectBtnText} numberOfLines={1}>
+                    {`File everything under: ${filedUnder ? filedUnder.name : 'No Project'}  ${feedProjectPicker === feed.id ? '▴' : '▾'}`}
+                  </Text>
+                </TouchableOpacity>
               </View>
               <TouchableOpacity
                 style={styles.removeFeedBtn}
@@ -5146,7 +5218,24 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 <Text allowFontScaling={false} style={styles.removeFeedBtnText}>Remove</Text>
               </TouchableOpacity>
             </View>
-          ))}
+            {feedProjectPicker === feed.id && (
+              <View style={styles.feedProjectPicker}>
+                <Text allowFontScaling={false} style={styles.checkSettingHint}>
+                  Use this when a calendar is for one course or client. For a calendar that mixes several, leave it on No Project and enter words under each Project's settings instead.
+                </Text>
+                {[undefined, ...projects.filter(project => project.status === 'active')].map(project => (
+                  <TouchableOpacity key={project?.id ?? 'none'} style={styles.feedProjectOption}
+                    onPress={() => handleSetFeedProject(feed, project?.id)}>
+                    <Text allowFontScaling={false} style={styles.feedProjectBtnText}>
+                      {`${(project?.id ?? undefined) === feed.projectId ? '●' : '○'} ${project ? project.name : 'No Project'}`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            </View>
+            );
+          })}
 
           <SettingChoice
             label="Time format"
@@ -6533,6 +6622,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
 
         </View>
       )}
+      {bulkFileFeed && <BulkFilePanel
+        calendarName={bulkFileFeed.name}
+        items={unfiledFeedItems(bulkFileFeed)}
+        projects={projects}
+        onFile={handleBulkFile}
+        onClose={() => setBulkFileFeed(null)} />}
       {showWorkspaceBackup && <WorkspaceBackupPanel
         disabled={isLoading || workspaceBusy || syncPhase === 'syncing' || archiveMoveBusy}
         onRestored={onWorkspaceRestored} onClose={() => setShowWorkspaceBackup(false)} />}
@@ -7658,6 +7753,10 @@ const styles = StyleSheet.create({
     color: '#505050',
     fontSize: 11,
   },
+  feedProjectBtn: { alignSelf: 'flex-start', borderWidth: 1, borderColor: '#000000', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4, marginTop: 5, minHeight: 32, justifyContent: 'center' },
+  feedProjectBtnText: { color: '#000000', fontSize: 12, fontWeight: 'bold' },
+  feedProjectPicker: { borderWidth: 1, borderColor: '#000000', borderRadius: 6, padding: 8, marginTop: -2, marginBottom: 8, backgroundColor: '#ffffff' },
+  feedProjectOption: { minHeight: 38, justifyContent: 'center', borderTopWidth: 1, borderTopColor: '#d0d0d0' },
   removeFeedBtn: {
     borderWidth: 1,
     borderColor: '#000000',

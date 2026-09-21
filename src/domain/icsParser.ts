@@ -19,6 +19,26 @@ export function unfoldIcsContent(icsData: string): string[] {
   return unfolded;
 }
 
+/** Splits a list value on commas that are not escaped with a backslash. */
+export function splitIcsList(value: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === '\\' && i + 1 < value.length) {
+      current += char + value[i + 1];
+      i++;
+    } else if (char === ',') {
+      parts.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
 /**
  * Unescapes ICS string values
  */
@@ -362,6 +382,7 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar', diag
           summary: currentEvent.summary || '(No Title)',
           description: currentEvent.description,
           location: currentEvent.location,
+          ...(currentEvent.categories?.length ? { categories: currentEvent.categories } : {}),
           start,
           end,
           allDay: currentEvent.allDay || false,
@@ -431,6 +452,13 @@ export function parseIcsContent(icsData: string, calendarName = 'Calendar', diag
       }
       case 'LOCATION':
         currentEvent.location = unescapeIcsValue(propVal);
+        break;
+      case 'CATEGORIES':
+        // A list separated by unescaped commas; the property may also repeat.
+        currentEvent.categories = [
+          ...(currentEvent.categories || []),
+          ...splitIcsList(propVal).map(unescapeIcsValue).map(value => value.trim()).filter(Boolean),
+        ];
         break;
       case 'DTSTART':
       case 'DUE': {

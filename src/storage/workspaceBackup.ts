@@ -51,6 +51,7 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
     requireValid(object(feed) && typeof feed.id === 'string' && !!feed.id &&
       typeof feed.name === 'string' && typeof feed.enabled === 'boolean' && !feedIds.has(feed.id), 'calendar feed');
     requireValid(!feed.url && (!feed.localPath || typeof feed.localPath === 'string'), 'calendar feed credentials or path');
+    if (feed.projectId !== undefined) requireValid(typeof feed.projectId === 'string', 'calendar feed project');
     feedIds.add(feed.id);
   }
   for (const key of ['caldavPassword', 'taskCaldavPassword', 'caldavCustomUrl', 'taskCaldavServerUrl']) {
@@ -87,7 +88,7 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
         requireValid(date(item.start) && date(item.end) && typeof item.allDay === 'boolean' && Array.isArray(item.attendees), 'event dates or attendees');
         requireValid(item.attendees.every((attendee: any) => object(attendee) && Object.values(attendee).every(v => typeof v === 'string')), 'attendee');
       }
-      for (const key of ['exceptionDates', 'recurrenceExceptionInstants', 'actionItems']) {
+      for (const key of ['exceptionDates', 'recurrenceExceptionInstants', 'actionItems', 'categories']) {
         if (item[key] !== undefined) requireValid(strings(item[key]), key);
       }
       for (const key of ['folder', 'notePath', 'caldavUrl', 'caldavCollectionUrl', 'etag', 'rrule', 'parentId', 'areaId',

@@ -683,3 +683,30 @@ END:VCALENDAR`);
     expect(expandEventsForDate(events, new Date(2026, 7, 23))).toHaveLength(0);
   });
 });
+
+test('CATEGORIES are read as a list, including repeated properties and escaped commas', () => {
+  const ics = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:quiz-1', 'SUMMARY:Quiz 2', 'DTSTART:20260930T100000Z', 'DTEND:20260930T110000Z',
+    'CATEGORIES:IDS105,Quizzes', 'CATEGORIES:Week 5\\, part 1',
+    'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:plain', 'SUMMARY:Plain', 'DTSTART:20260930T100000Z', 'DTEND:20260930T110000Z',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+  const [quiz, plain] = parseIcsContent(ics, 'Course');
+  expect(quiz.categories).toEqual(['IDS105', 'Quizzes', 'Week 5, part 1']);
+  expect(plain.categories).toBeUndefined();
+});
+
+test('a Brightspace feed keeps the course in LOCATION', () => {
+  const ics = [
+    'BEGIN:VCALENDAR', 'PRODID:-//D2L//NONSGML v1.0//EN', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:6606-13144600@learn.example.edu', 'SUMMARY:Module Four Begins',
+    'LOCATION:IDS-105-18678-M01 Awareness & Online Learning 2026 C-5 (Aug - Oct)',
+    'DTSTART;VALUE=DATE:20260921', 'DTEND;VALUE=DATE:20260922',
+    'END:VEVENT', 'END:VCALENDAR',
+  ].join('\r\n');
+  const [event] = parseIcsContent(ics, 'All Courses');
+  expect(event.location).toBe('IDS-105-18678-M01 Awareness & Online Learning 2026 C-5 (Aug - Oct)');
+});

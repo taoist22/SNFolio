@@ -35,7 +35,7 @@ SNFolio works without an online account. Calendar connections and PARA organizat
 - **PARA Workspace**: Organize actionable Projects, ongoing Areas, reference Resources, and a unified Archive. Reorder Projects, assign them directly to Areas, review open and completed work in separate columns, and link Projects, Areas, and Resources to folders of Supernote notes and other files.
 - **Daily and PARA Notes**: Open or create daily journals and create, browse, and open notes and other files connected to Projects, Areas, and Resources. Create named notes for events and tasks, optionally filing them beneath their assigned Project or Area folder, or link an existing note or PDF.
 - **Weekly Project Folders**: Give any Project (a course, a client engagement, a quarter of sprints) a start and due date, and SNFolio creates a folder per week, files each event or task note in the week it belongs to, and lists last, this and next week first. Files linked to the Project's tasks and events show **🔗** and what they are linked to.
-- **Auto-file from Calendars**: File Canvas, Outlook, Google and CalDAV items under a Project automatically by a word in their title, such as a course code or client name.
+- **Auto-file from Calendars**: File Brightspace, Canvas, Moodle, Outlook, Google and CalDAV items under a Project automatically, by a course code or client name found in their title, location or categories, or by filing a whole calendar under one Project.
 - **Undo**: Undo Mark Complete, Archive, Move to Areas, Delete, and file moves from the message that confirms them.
 - **Class and Meeting Markers**: Mark Projects as Class or Work, and events as Class or Meeting. The calendar shows **C** and **M** beside items, and **[N]** or **[PDF]** when a note or PDF is linked.
 - **Workspace Backup & Restore**: Save tasks, calendars, PARA organization, settings, and note links to a backup file, automatically once a day if you like, and restore them later without touching your notes.
@@ -161,7 +161,7 @@ The same steps work for a 16-week course or a 12-week client engagement:
    - Under **Weeks**, tap **📅 Set start date**, check the Week 1 dates shown, and pick another weekday under **Weeks run** if your weeks start differently.
    - Tap **📁 Create Week Folders**.
    - Under **Notes for recurring events**, keep **One notebook for the series**, or choose **One note per session** to get a dated note for each lecture or meeting in its week folder.
-   - Under **Auto-file from calendars**, enter the course code or client name as it appears in your calendar's item titles, and tap **Save**.
+   - Under **Auto-file from calendars**, enter the course code or client name, and tap **Save**. If the message says 0 items were filed, file the whole calendar under the Project instead (see **Filing calendar items automatically** below).
    - Tap **Close**.
 4. From now on, **Create Note** on the Project's events, and on its tasks, offers the right week folder first. Anything else you write goes in with **+ New Note** in the week's section.
 5. Once a week, open **Planner ▾ → Weekly Review** and check **This Week by Project**.
@@ -193,7 +193,16 @@ Tap **Project settings … ▾ Change** to open these settings. Choices are save
 - **Notes for recurring events:** **One notebook for the series** (the default: a weekly lecture or standing meeting keeps one notebook, with a new page for each session, in the Project's folder) or **One note per session** (each session gets its own dated note, filed in its week folder when the Project has weeks). Notes already made keep their links when you switch.
 - Creating a note while browsing a subfolder files it in that subfolder and leaves the Project's folder unchanged.
 
-**Auto-file from calendars:** enter words such as a course code (`IDS105`) or client name (`Acme`), separated by commas, and tap **Save**. Items from subscribed calendars (Canvas, Outlook, Google) and CalDAV whose title contains any of them are filed under this Project as they sync, so they get its **C**/**M** marker, appear in **Upcoming**, and their notes go to its folder. Items you have already filed elsewhere are left alone, and an item you unfile by hand is not filed again.
+**Filing calendar items automatically.** Items filed under a Project get its **C**/**M** marker, appear in **Upcoming** and **This Week by Project**, and their notes go to its folder. There are two ways, and items you have already filed elsewhere are always left alone; an item you unfile by hand is not filed again.
+
+- **By words, for a calendar that mixes courses or clients.** In **Project settings → Auto-file from calendars**, enter a course code (`IDS105`) or client name (`Acme`), separated by commas, and tap **Save**. SNFolio looks for them in each item's **title, location and categories**, ignoring case, spaces and hyphens, so `IDS105` matches `IDS-105-18678`. Learning systems put the course in different places: Canvas usually in the title, Brightspace in the location, Moodle in the categories. The message after **Save** says how many items matched; if it says 0, use the next option.
+- **A whole calendar, for one course or client.** In **⚙ → Connections & Settings → Connected Calendars**, tap **File everything under: No Project ▾** below a calendar and choose the Project. Use this when the items carry no course or client name, for example Google Classroom, which gives each class its own calendar, or a client's shared calendar. It takes priority over words.
+
+- **By hand, many at once, for whatever is left.** In **Connected Calendars**, tap **Review unfiled items (N)…** below a calendar. Tick items one by one, tap **Select all**, or write a word and tap **Select matching** (it looks in titles and locations, ignoring hyphens and spaces). Choose the Project and tap **File N under …**. The message afterwards has an **Undo** button.
+
+These apply to subscribed calendars, imported calendar files and CalDAV items (words only for CalDAV). An imported `.ics` file is a snapshot: it does not update until you import it again, so subscribe with the calendar's link when you can.
+
+**Brightspace (D2L):** open **Calendar**, then **Settings**, tick **Enable Calendar Feeds** and save; back in the calendar, **Subscribe** gives the link. Its items carry the course code in their location, so one **All Courses** subscription can be sorted by entering each course's code in its Project.
 
 **Project Actions…** at the bottom of a Project holds the actions that change its status:
 

@@ -233,6 +233,8 @@ export interface CalendarEvent {
   summary: string;
   description?: string;
   location?: string;
+  /** CATEGORIES from the calendar file; Moodle, for one, puts the course here. */
+  categories?: string[];
   start: Date;
   end: Date;
   allDay: boolean;
@@ -302,6 +304,8 @@ export interface MeetingSnapshot {
 export interface CalendarFeed {
   id: string;
   name: string;
+  /** Files every item from this calendar under this Project (unless already filed elsewhere). */
+  projectId?: string;
   url?: string;
   localPath?: string;
   color?: string;
