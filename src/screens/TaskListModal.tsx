@@ -1,3 +1,4 @@
+import { isPdfPath, LinkedFileMarker } from './LinkedFileMarker';
 import React, { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Area, CalendarTask, Project } from '../domain/types';
@@ -292,13 +293,13 @@ export function TaskListModal({
                           numberOfLines={1}
                           style={[styles.rowText, task.completed && styles.rowTextDone]}
                         >
-                          {taskRowLabel(task, true)}
+                          <LinkedFileMarker item={task} />{taskRowLabel(task, true)}
                         </Text>
                       </TouchableOpacity>
 
                       {!notePath && onLinkNote && (
                         <TouchableOpacity style={styles.noteButton} onPress={() => onLinkNote(task)}>
-                          <Text allowFontScaling={false} style={styles.noteButtonText}>Link Note</Text>
+                          <Text allowFontScaling={false} style={styles.noteButtonText}>Link Note / PDF</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity
@@ -307,7 +308,7 @@ export function TaskListModal({
                         accessibilityLabel={notePath ? `Open note for ${task.title}` : `Create note for ${task.title}`}
                       >
                         <Text allowFontScaling={false} style={styles.noteButtonText}>
-                          {notePath ? '📂 Open Note' : '📝 Create Note'}
+                          {notePath ? (isPdfPath(notePath) ? '📄 Open PDF' : '📂 Open Note') : '📝 Create Note'}
                         </Text>
                       </TouchableOpacity>
                     </View>

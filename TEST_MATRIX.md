@@ -259,3 +259,113 @@ Final validation: 657 tests / 49 suites pass; typecheck passes; lint has zero er
 The maintainer accepted build 68 ("this is good") and authorized commit, push, and release. Build 69 promotes the same application code with final version metadata.
 
 Final validation: 647 tests / 46 suites pass; typecheck passes; lint has zero errors (574 warnings); clean native build and package validation pass for 0.1.24/build 69, including app.npk without the floating launcher module.
+
+
+## Workspace backup and restore — local validation
+
+Version metadata remains unchanged at 0.1.24 / build 69. No release has been created.
+
+Local automated coverage: failed storage reads and corrupt JSON block writes; valid datasets
+remain readable internally; encrypted-store failures block saves; version/shape/date/import
+validation; credential exclusion; external backup readback; denied permissions; missing imports;
+replacement restore; replay after partial writes or journal cleanup failure.
+
+Device acceptance checks (not yet run):
+
+- Create a backup with local tasks/events, PARA records, links, and imported calendars. Verify
+  the file in Export / SNFolio Backups and copy it to a computer.
+- Restore after additional edits. Confirm the before-restore backup contains those edits,
+  restored counts match the preview, and note files remain untouched.
+- Confirm missing linked notes are listed and all restored feeds/accounts are paused.
+- Confirm reconnection is blocked until review is acknowledged; re-enter credentials and
+  selectively enable feeds. Test pending changes against a disposable CalDAV account.
+- Deny read/write permissions and confirm no replacement occurs. Try truncated/unsupported
+  backup files and an unavailable imported calendar.
+- On a disposable test device, back up notes and the workspace externally, reset PluginHost
+  storage, reinstall the full plugin, restore the workspace, and verify imported calendars.
+- Interrupt restoration and reopen: recovery must finish before the workspace becomes editable.
+- Check the scrollable confirmation dialog on both Nomad and Manta.
+
+
+Backup permission-window correction:
+- Device report: the native backup modal covered the file permission prompt, leaving Working visible indefinitely.
+- Backup now uses a screen-level in-panel overlay; permission prompts and the native picker can appear above it.
+- Pending operations disable duplicate actions and closing; permission denial returns usable controls.
+- Device retest: with file permissions revoked, Create Backup → allow read/write → verified result;
+  repeat with Deny → error and usable Close; Choose Backup to Restore → visible picker → cancel or preview.
+
+
+Legacy backup-settings correction:
+- Device report: backup validation rejected recentNotePaths retained from the removed Recent Files feature.
+- Validator now accepts legacy recentNotePaths string arrays and floatingLauncherEnabled booleans,
+  while continuing to reject malformed values. These settings do not re-enable removed features.
+- Regression coverage seeds an upgraded installation, exports, parses, restores, and exports again.
+- Device retest pending: Create Backup with existing settings, then review the resulting file.
+
+PARA file-list refresh correction:
+- Device report: selecting a Project repeatedly flashed attachments and the reading-files message.
+- Cause: workspace activity updates re-rendered the parent, replacing the folder-reader callback;
+  the panel's effect treated each replacement as another request to reload.
+- File listing now uses the latest callback without depending on its identity, and ignores stale
+  request results after changing folders/items or unmounting.
+- Automated checks: 682 tests / 51 suites pass; typecheck passes; lint has zero errors.
+- Device retest pending: select Projects, Areas, and Resources; verify files settle, manual Refresh
+  works, and switching items quickly does not show results from the previous folder.
+
+
+PDF linking for events and tasks:
+- Shared Link Note / PDF picker accepts .note and .pdf files and starts at the user-storage root.
+- Linked PDFs open through the native document reader; notebooks retain the note editor.
+- Automated coverage includes PDF selection, uppercase extension, denial/cancellation, draft
+  event/task PDF links on Save, and native document-versus-note dispatch.
+- Device retest pending: link a PDF to an existing and a new event/task; save, reopen SNFolio,
+  open the PDF, change the link, and unlink. Confirm the PDF file remains unchanged.
+
+Linked-file markers:
+- Individual task/event titles display [N] for linked notes and [PDF] for linked PDF documents.
+- Markers appear in calendar month/week, day schedule, task lists, planner/focus/review, and PARA.
+- Markers read existing in-memory mappings, follow recurring-event series links, and update on unlink.
+- Device retest pending: link/change/unlink a note or PDF on a task and an event; verify the markers
+  across views, including recurring events and narrow Nomad month cells.
+
+Calendar designations (Class / Meeting):
+- Agreed design: Project category General / Class / Work plus an optional Default calendar designation (Category default, None, Class, Meeting). Class projects default their events to Class; other projects stay unmarked unless their default is set to Meeting. Each event can follow the project default or choose None, Class, or Meeting, including standalone meetings without a project.
+- Markers: C = Class, M = Meeting, shown before titles in all views and as month-cell badges (counting items hidden behind the overflow count). [N] / [PDF] remain independent attachment markers, e.g. "C [PDF]". Month-cell C/M now describe designations, replacing the old note-kind C/M/N badges; D still marks a daily journal.
+- Create Note preselects Class or Meeting from the event's designation. Designations and project categories are included in workspace backups and validated on restore.
+- Tasks (maintainer decision 2026-09-20): tasks inherit C when their project's events default to Class; tasks never get M and have no per-task override. Marker labels are now "Class" / "Meeting" so they fit tasks and events.
+- Automated checks: 704 tests / 54 suites pass; typecheck passes; lint has zero errors.
+- Device retest pending: set a project to Class → its events and tasks show C in month cells, Day Planner, task lists, Week view and PARA; set a Work project's default to Meeting → its events show M, its tasks show nothing; override one event to None; create a standalone Meeting event; confirm C/M sit alongside [N]/[PDF]; Create Note on a Class event preselects Class; check narrow Nomad month cells.
+- Build 2026-09-20 18:45 (version unchanged 0.1.24 / 69): build/generated and build/outputs removed first, fresh build and package validation pass. Bundle confirmed to contain workspace backup, Link Note / PDF, calendar designation and project category controls, the queued-notes check, the task delete sheet, and task C inheritance; native package contains the backup read/write methods and no floating launcher module. First build to include the designation feature.
+- Project detail: "📝 Associated Notes" renamed "🔗 Linked Files" (it lists linked notes and PDFs, not a folder), rows use 📄 instead of the folder icon, and the empty-state text explains it. README documents Project Files vs Linked Files, Project category and designations, the C/M/[N]/[PDF]/D markers, Link Note / PDF, and Workspace Backup & Restore; docs/PARA_AND_NOTES.md updated to match. 704 tests pass; typecheck passes. Device check: open a Project, confirm the Linked Files heading and 📄 rows render.
+- Linked PDFs: the open action now reads "Open PDF" (📄) instead of "Open Note" in the item form, event details, All Tasks, and Day schedule blocks; notes keep "Open Note". Shared isPdfPath / openLinkedFileLabel helpers. 707 tests pass. Device check: an item linked to a PDF shows Open PDF in each place and opens the reader.
+
+Project screen safety, class weeks, and existing folders (2026-09-20):
+- Device report: IDS105 vanished after its category was changed and a due date set. Backup comparison (Sep 16 vs Sep 20) showed the project intact with 11 attached tasks but status "done" without completedAt: Finish had been tapped (read as "finish editing"), and the due-date save then wrote back the screen's stale copy. Recoverable via Archive → Projects → Reopen.
+- Project saves (due date, class start, grouping, rename, status) now read the stored project and refresh the open screen; the date picker no longer writes a captured copy.
+- Finish renamed Mark Complete and moved, with Archive / Move to Areas / Delete, into Project Actions… at the bottom of the project screen. Mark Complete confirms with an explanation (moves to Archive → Projects labeled Finished; tasks, events, linked files, folder, due date and settings unchanged; Reopen from Archive).
+- Category panel heading reads "▾ Change" / "▴ Close", states that choices save as tapped, and has a Close button.
+- Class projects: Class start date and Group Linked Files by None / Week. Calendar weeks from the week containing the start date (week-start setting), counting through breaks; empty weeks hidden; a file appears under each week it is linked from; Before Week 1 and No date groups. New project fields classStartDate / linkedFilesGrouping load, back up, and validate.
+- Restore dialog: when no folder was moved into Archive it says so, shows the folder location, hides the folder-move warning, and offers Reopen (completed Project) or Restore; the result message says the folder is unchanged.
+- PARA → + Existing Folder… → Project / Area / Resource → in-panel folder browser. A folder already used by an item brings that item back (active) with its tasks; otherwise a new item named after the folder is created.
+- README and docs/PARA_AND_NOTES.md updated. Automated: 719 tests / 56 suites pass (new: week grouping, project screen actions/confirmation/close/grouping, class-field backup round trip); typecheck passes; lint has zero errors.
+- Device checks: (1) Archive → Projects → IDS105 → Reopen dialog wording, then Reopen. (2) Category panel Change/Close. (3) Set IDS105 class start date and Group by Week; confirm headings and a shared notebook under several weeks. (4) Set a due date and confirm status, category and designations are unchanged. (5) Project Actions → Mark Complete → read explanation → Cancel; then confirm on a disposable project and Reopen it. (6) + Existing Folder… → Project → pick an unlinked folder; then pick a completed project's folder and confirm it returns. (7) Nomad: PARA top bar wraps cleanly.
+- Choose Folder (Projects, Areas, Resources) now saves the new folder onto the stored item and refreshes the open project, instead of writing back the caller's copy (same stale-copy class as the IDS105 status loss). 719 tests pass.
+- Build 2026-09-20 19:49 (version unchanged 0.1.24 / 69): build/generated and build/outputs removed first; fresh build and package validation pass. Bundle confirmed to contain Project Actions / Mark Complete, category Close text, class start date and weekly grouping, + Existing Folder, the truthful restore dialog, Open PDF, Linked Files, task C, designations, and backup; native package has the backup methods and no floating launcher.
+
+Week folders for Class projects (maintainer decision 2026-09-20, option A):
+- Problem: more notes per week than tasks/events, and each task/event links one file, so most Project Files had no week.
+- Class projects with a class start date and due date get Create Week Folders: Week 01 … Week NN (zero-padded) in the project folder, one per calendar week from the start date to the due date; existing folders are kept; created sequentially; the file panel refreshes afterwards.
+- While the class is running, Project Files opens in the current week's folder (only if it exists, once per visit), so + New Note files there; Up returns to the project folder.
+- Bug fixed on the way: creating a note while browsing a subfolder re-pointed the project (or area/resource) folder to that subfolder. Note creation now records the item's own folder only when it has none.
+- Automated: 724 tests / 56 suites pass (new: week folder names/counts/current week, panel preferred start folder and fallback, Create Week Folders button and missing-date hint); typecheck passes; lint has zero errors.
+- Device checks: set IDS105 start date and due date → Create Week Folders → status shows counts; folders appear in Project Files and the Supernote file manager; reopen IDS105 → opens in this week's folder; + New Note there → note lands in the week folder and the project folder stays the same (Choose Folder path unchanged); Up shows all week folders; run Create Week Folders again → reports them as already there.
+- Per-class week start (maintainer decision 2026-09-20): new Project field classWeekStartsOn. Default (unset) = weeks run seven days from the class start date's weekday; optionally a fixed weekday (Mon … Sun). Used for Linked Files week headings, the week count / Create Week Folders, and the current-week folder; calendar views keep the app-wide week start. The panel shows "Week 1: <dates>" and, with a due date, the week count and last week. Backed up and validated (0–6). 725 tests pass. Device check: IDS105 with its real start date → confirm Week 1 dates under both "From class start day" and "Mon"; Create Week Folders count matches; grouping headings move accordingly.
+- Build 2026-09-20 20:40 (version unchanged 0.1.24 / 69): build/generated and build/outputs removed first; fresh build and package validation pass. Bundle confirmed to contain week folders, per-class "Weeks run", Project Actions / Mark Complete, + Existing Folder, the Reopen dialog, Open PDF, and weekly Linked Files grouping; native package has the backup methods and no floating launcher.
+
+Project Files sections and Move… (maintainer decision 2026-09-20):
+- Project Files (Projects, Areas, Resources) now shows files in the item's folder followed by each subfolder as a collapsible section (loaded when opened, with a file count once read). A class's current week section opens automatically once per visit and is marked "this week"; the top + New Note files there; each open section has "+ New Note in <folder>". Deeper folders and Choose Folder still browse. This replaces opening Project Files inside the current week folder.
+- Move… on every file in Project Files and Linked Files: destinations are the item folder and its subfolders (linked files list the linked item's class week first as "(suggested)"). moveFileToFolder moves the file plus <name>.<ext>.mark annotations and <stem>.sdr reading data (confirmed on device), one native call at a time, refuses to overwrite, and moves everything back if any step fails. Afterwards calendarStorage.rewritePathPrefix repoints mappings; open-behind note is refused.
+- .sdr folders are now hidden from file listings like .mark files.
+- Automated: 733 tests / 56 suites pass (new: move with companions, no overwrite, rollback, same-folder refusal; sections, auto-open current week, collapse, + New Note targets, Move targets and refusal message; linked Move suggestion order); typecheck passes; lint has zero errors.
+- Device checks: IDS105 Project Files shows week sections, this week open; open/close another; + New Note in a section. Move an unlinked note into a week; move a linked PDF with annotations → annotations intact, [PDF] still opens it, Linked Files shows the new path; try moving onto an existing name → refused, nothing moved; try moving the note open behind SNFolio → refused.
+- Build 2026-09-20 21:16 (version unchanged 0.1.24 / 69): build/generated and build/outputs removed first; fresh build and package validation pass. Bundle confirmed to contain Project Files sections ("this week", "+ New Note in"), Move… with suggested week, companion moves, link updates and the open-note refusal, plus all earlier features; native package has the backup methods and no floating launcher.

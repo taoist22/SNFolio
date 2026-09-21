@@ -8,18 +8,21 @@ jest.mock('../supernote/pickLinkedNote', () => ({ pickLinkedNote: jest.fn() }));
 function button(tree: TestRenderer.ReactTestRenderer, label: string) {
   return tree.root.findAllByType(TouchableOpacity).reverse().find(node => node.findAllByType(Text).some(text => [text.props.children].flat().join('') === label))!;
 }
-test.each(['task', 'event'] as const)('new %s holds a selected note until Save', async type => {
-  (pickLinkedNote as jest.Mock).mockResolvedValue('/Note/Existing.note');
+test.each([
+  ['task', '/Note/Existing.note'], ['event', '/Note/Existing.note'],
+  ['task', '/Document/Reference.pdf'], ['event', '/Document/Reference.pdf'],
+] as const)('new %s holds selected file %s until Save', async (type, path) => {
+  (pickLinkedNote as jest.Mock).mockResolvedValue(path);
   const createTask = jest.fn(), createEvent = jest.fn(), close = jest.fn();
   let tree: TestRenderer.ReactTestRenderer;
   act(() => { tree = TestRenderer.create(<ItemCreationModal visible type={type} targetDate={new Date(2026, 8, 12)} initialTitle="Linked item" availableFeeds={[]} onClose={close} onCreateTask={createTask} onCreateEvent={createEvent} />); });
-  await act(async () => { await button(tree!, 'Link Note…').props.onPress(); });
+  await act(async () => { await button(tree!, 'Link Note / PDF…').props.onPress(); });
   expect(createTask).not.toHaveBeenCalled(); expect(createEvent).not.toHaveBeenCalled();
   const save = tree!.root.findAllByType(TouchableOpacity).reverse().find(node => node.findAllByType(Text).some(text => [text.props.children].flat().join('').includes('💾 Save')));
   expect(save).toBeDefined();
   act(() => save!.props.onPress());
-  if (type === 'task') expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ linkedNotePath: '/Note/Existing.note' }));
-  else expect(createEvent.mock.calls[0][5]).toBe('/Note/Existing.note');
+  if (type === 'task') expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ linkedNotePath: path }));
+  else expect(createEvent.mock.calls[0][5]).toBe(path);
   act(() => tree!.unmount());
 });
 
@@ -42,11 +45,23 @@ test('canceling a new item discards the pending note link', async () => {
   const render = (visible: boolean) => <ItemCreationModal visible={visible} type="task" targetDate={date} initialTitle="Draft" availableFeeds={[]} onClose={close} onCreateTask={createTask} onCreateEvent={createEvent} />;
   let tree: TestRenderer.ReactTestRenderer;
   act(() => { tree = TestRenderer.create(render(true)); });
-  await act(async () => { await button(tree!, 'Link Note…').props.onPress(); });
+  await act(async () => { await button(tree!, 'Link Note / PDF…').props.onPress(); });
   act(() => tree!.update(render(false)));
   act(() => tree!.update(render(true)));
-  expect(button(tree!, 'Link Note…')).toBeDefined();
+  expect(button(tree!, 'Link Note / PDF…')).toBeDefined();
   expect(createTask).not.toHaveBeenCalled();
   expect(createEvent).not.toHaveBeenCalled();
   act(() => tree!.unmount());
+});
+
+test.each(['none', 'class', 'meeting'] as const)('event saves explicit %s calendar designation', async designation => {
+  const create = jest.fn();
+  let tree!: TestRenderer.ReactTestRenderer;
+  act(() => { tree = TestRenderer.create(<ItemCreationModal visible type="event" targetDate={new Date(2026, 8, 20)} initialTitle="Designated event" availableFeeds={[]} onClose={() => {}} onCreateTask={() => {}} onCreateEvent={create} />); });
+  const label = designation === 'none' ? 'None' : designation === 'class' ? 'Class (C)' : 'Meeting (M)';
+  act(() => button(tree, label).props.onPress());
+  const save = tree.root.findAllByType(TouchableOpacity).reverse().find(node => node.findAllByType(Text).some(text => [text.props.children].flat().join('').includes('💾 Save')))!;
+  act(() => save.props.onPress());
+  expect(create.mock.calls[0][6]).toBe(designation);
+  act(() => tree.unmount());
 });

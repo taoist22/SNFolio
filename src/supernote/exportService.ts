@@ -21,7 +21,8 @@ const CalendarFile = NativeModules.CalendarFile as CalendarFileModule | undefine
 function isVisibleResourcePath(path: unknown): path is string {
   if (typeof path !== 'string') return false;
   const name = path.split('/').pop() || '';
-  return Boolean(name) && !name.startsWith('.') && !name.toLowerCase().endsWith('.mark');
+  // .mark annotations and .sdr reading folders belong to a document, not the user's file list.
+  return Boolean(name) && !name.startsWith('.') && !name.toLowerCase().endsWith('.mark') && !name.toLowerCase().endsWith('.sdr');
 }
 
 /** Fallback if getExportPath is unavailable; the standard user-visible area. */
@@ -38,6 +39,81 @@ export interface ParaFolderEntry {
   name: string;
   path: string;
   isFolder: boolean;
+}
+
+/**
+ * Files Supernote keeps beside a document: `<name>.pdf.mark` holds its
+ * handwriting and annotations, and `<name without extension>.sdr` a folder of
+ * reading data. They must travel with the file or the annotations are lost.
+ */
+export function companionPaths(filePath: string): string[] {
+  const slash = filePath.lastIndexOf('/');
+  const dir = filePath.slice(0, slash);
+  const name = filePath.slice(slash + 1);
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  return [`${filePath}.mark`, `${dir}/${stem}.sdr`];
+}
+
+/**
+ * Moves one file, and any companion files, into another folder on the same
+ * storage. Nothing is overwritten. If any step fails, what was already moved is
+ * moved back, so a document and its annotations are never separated.
+ */
+export async function moveFileToFolder(sourcePath: string, destinationFolder: string): Promise<ExportResult> {
+  const canWrite = await ensureFileWritePermission();
+  const canDelete = canWrite ? await ensureFileDeletePermission() : false;
+  if (!canWrite || !canDelete) {
+    return { success: false, message: 'Moving a file needs both File Write and File Delete permission.' };
+  }
+  if (!FileUtils.renameToFile || !FileUtils.exists) {
+    return { success: false, message: 'This device does not support moving files from SNFolio.' };
+  }
+  const source = sourcePath.replace(/\/+$/, '');
+  const folder = destinationFolder.replace(/\/+$/, '');
+  const name = source.slice(source.lastIndexOf('/') + 1);
+  const destination = `${folder}/${name}`;
+  if (source.slice(0, source.lastIndexOf('/')) === folder) {
+    return { success: false, message: `${name} is already in ${folder.split('/').pop()}.` };
+  }
+  try {
+    // One native call at a time: concurrent file calls have frozen the device before.
+    if (!(await FileUtils.exists(source))) return { success: false, message: `${name} could not be found.` };
+    if (!(await FileUtils.exists(folder))) return { success: false, message: `The folder ${folder.split('/').pop()} does not exist.` };
+    if (await FileUtils.exists(destination)) {
+      return { success: false, message: `${folder.split('/').pop()} already has a file named ${name}. Nothing was moved.` };
+    }
+    const pairs: Array<[string, string]> = [[source, destination]];
+    const sourceCompanions = companionPaths(source);
+    const destinationCompanions = companionPaths(destination);
+    for (let i = 0; i < sourceCompanions.length; i++) {
+      if (await FileUtils.exists(sourceCompanions[i])) {
+        if (await FileUtils.exists(destinationCompanions[i])) {
+          return { success: false, message: `${folder.split('/').pop()} already has ${destinationCompanions[i].split('/').pop()}. Nothing was moved.` };
+        }
+        pairs.push([sourceCompanions[i], destinationCompanions[i]]);
+      }
+    }
+    const moved: Array<[string, string]> = [];
+    for (const [from, to] of pairs) {
+      const ok = await FileUtils.renameToFile(from, to);
+      if (!ok || !(await FileUtils.exists(to))) {
+        for (const [undoFrom, undoTo] of moved.reverse()) {
+          try { await FileUtils.renameToFile(undoTo, undoFrom); } catch (e) { /* Best effort; reported below. */ }
+        }
+        return { success: false, message: `Supernote could not move ${from.split('/').pop()}. Nothing was moved; close the file if it is open and try again.` };
+      }
+      moved.push([from, to]);
+    }
+    const extra = pairs.length - 1;
+    return {
+      success: true,
+      path: destination,
+      message: `Moved ${name} to ${folder.split('/').pop()}${extra ? ` with its ${extra === 1 ? 'annotation file' : 'annotation and reading files'}` : ''}.`,
+    };
+  } catch (e: any) {
+    return { success: false, message: e?.message || 'Supernote could not move the file.' };
+  }
 }
 
 /** Fast, same-storage folder move. The native layer refuses overwrite/merge. */

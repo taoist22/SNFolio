@@ -79,3 +79,24 @@ test('bounds recurrence warnings derived from imported calendar data', () => {
   expect(text).not.toContain(recurrenceError);
   expect(text.length).toBeLessThan(600);
 });
+
+test.each([
+  ['/Document/Syllabus.pdf', '📄 Open PDF'],
+  ['/Document/Syllabus.PDF', '📄 Open PDF'],
+  ['/Note/Lecture.note', '📂 Open Note'],
+])('a linked %s is opened with the matching label', (notePath, label) => {
+  const event: CalendarEvent = {
+    uid: 'linked', summary: 'Lecture', start: new Date(2026, 8, 20, 9), end: new Date(2026, 8, 20, 10),
+    allDay: false, attendees: [],
+  };
+  let renderer!: TestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = TestRenderer.create(
+      <EventDetailsModal event={event} readOnly={false} notePath={notePath} onClose={jest.fn()} onEdit={jest.fn()}
+        onDelete={jest.fn()} onCopy={jest.fn()} onHide={jest.fn()} onNoteAction={jest.fn()} />
+    );
+  });
+  const text = renderer.root.findAllByType(Text).map(node => [node.props.children].flat(Infinity).join('')).join('|');
+  expect(text).toContain(label);
+  act(() => renderer.unmount());
+});

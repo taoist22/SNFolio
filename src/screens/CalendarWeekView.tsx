@@ -1,3 +1,4 @@
+import { LinkedFileMarker } from './LinkedFileMarker';
 import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
@@ -85,7 +86,7 @@ export function CalendarWeekView({
           <Text allowFontScaling={false} style={styles.dashboardCheck}>{statusGlyph(taskStatus(task))}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.dashboardTaskBody} onPress={() => onEditTask(task)}>
-          <Text allowFontScaling={false} style={styles.dashboardTaskText} numberOfLines={1}>{taskLabel(task)}</Text>
+          <Text allowFontScaling={false} style={styles.dashboardTaskText} numberOfLines={1}><LinkedFileMarker item={task} />{taskLabel(task)}</Text>
         </TouchableOpacity>
       </View>
     ));
@@ -119,7 +120,7 @@ export function CalendarWeekView({
                 {shownEvents.map(event => (
                   <TouchableOpacity key={`${event.uid}-${event.start.toISOString()}`} style={styles.itemRow} onPress={() => onOpenEvent(event)}>
                     <Text allowFontScaling={false} style={styles.eventText} numberOfLines={2}>
-                      ○ {event.allDay ? 'All day' : formatDateTime(event.start, timeFormat)}{' '}{event.summary}
+                      ○ {event.allDay ? 'All day' : formatDateTime(event.start, timeFormat)}{' '}<LinkedFileMarker item={event} />{event.summary}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -130,7 +131,7 @@ export function CalendarWeekView({
                       <Text allowFontScaling={false} style={styles.taskGlyph}>{statusGlyph(taskStatus(task))}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.taskBody} onPress={() => onEditTask(task)}>
-                      <Text allowFontScaling={false} style={styles.taskText} numberOfLines={2}>{taskLabel(task)}</Text>
+                      <Text allowFontScaling={false} style={styles.taskText} numberOfLines={2}><LinkedFileMarker item={task} />{taskLabel(task)}</Text>
                     </TouchableOpacity>
                   </View>
                 ))}

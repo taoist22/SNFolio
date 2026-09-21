@@ -182,6 +182,40 @@ public class CalendarFileModule extends ReactContextBaseJavaModule {
         }
     }
 
+    @ReactMethod
+    public void readBackupFile(String pathOrUri, Promise promise) {
+        if (TextUtils.isEmpty(pathOrUri)) {
+            promise.reject("E_PATH", "No path given");
+            return;
+        }
+        InputStream input = null;
+        try {
+            if (pathOrUri.startsWith("content://")) {
+                input = getReactApplicationContext().getContentResolver().openInputStream(Uri.parse(pathOrUri));
+            } else {
+                String path = pathOrUri.startsWith("file://")
+                        ? Uri.parse(pathOrUri).getPath()
+                        : pathOrUri;
+                input = new FileInputStream(new File(path));
+            }
+            if (input == null) throw new IllegalStateException("Could not open selected file");
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                if (bytes.size() + read > 32 * 1024 * 1024) throw new IllegalStateException("Backup exceeds 32 MB");
+                bytes.write(buffer, 0, read);
+            }
+            promise.resolve(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
+        } catch (Throwable error) {
+            promise.reject("E_READ", error.getMessage(), error);
+        } finally {
+            if (input != null) {
+                try { input.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     /**
      * Copies imported calendar text into app-owned storage. Picker grants can
      * expire after the selection activity closes, so retaining only the
@@ -442,6 +476,33 @@ public class CalendarFileModule extends ReactContextBaseJavaModule {
      * Resolves with the absolute path actually written so JS can report a
      * location the user can go and find, rather than one it assumed.
      */
+    /** Finish a new backup before publishing its name; never overwrite an older snapshot. */
+    @ReactMethod
+    public void writeBackupFile(String path, String content, Promise promise) {
+        File temporary = null;
+        try {
+            File target = new File(path).getCanonicalFile();
+            if (!target.getPath().startsWith("/storage/") || !target.getName().endsWith(".snfolio.json")) {
+                throw new IllegalArgumentException("Choose a backup path in user storage");
+            }
+            File parent = target.getParentFile();
+            if (!parent.exists() && !parent.mkdirs()) throw new IllegalStateException("Could not create backup folder");
+            if (target.exists()) throw new IllegalStateException("Backup already exists");
+            temporary = File.createTempFile(".snfolio-", ".tmp", parent);
+            try (FileOutputStream output = new FileOutputStream(temporary)) {
+                output.write(content.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                output.getFD().sync();
+            }
+            if (target.exists() || !temporary.renameTo(target)) throw new IllegalStateException("Could not finalize backup");
+            promise.resolve(target.getAbsolutePath());
+        } catch (Throwable error) {
+            promise.reject("E_BACKUP_WRITE", error.getMessage(), error);
+        } finally {
+            if (temporary != null && temporary.exists()) temporary.delete();
+        }
+    }
+
     @ReactMethod
     public void writeTextFile(String path, String content, Promise promise) {
         if (path == null || path.length() == 0) {

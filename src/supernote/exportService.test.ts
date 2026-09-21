@@ -190,3 +190,65 @@ describe('openResourceFile', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('moveFileToFolder', () => {
+  const { FileUtils } = jest.requireMock('sn-plugin-lib');
+  const { moveFileToFolder, companionPaths } = jest.requireActual('./exportService');
+  const pdf = '/storage/emulated/0/Note/SNFolio/Projects/IDS105/Reading.pdf';
+  const week = '/storage/emulated/0/Note/SNFolio/Projects/IDS105/Week 05';
+
+  function disk(paths: string[]) {
+    const present = new Set(paths);
+    FileUtils.exists.mockImplementation(async (path: string) => present.has(path));
+    FileUtils.renameToFile.mockImplementation(async (from: string, to: string) => {
+      if (!present.has(from) || present.has(to)) return false;
+      present.delete(from); present.add(to);
+      return true;
+    });
+    return present;
+  }
+  afterEach(() => {
+    FileUtils.exists.mockReset().mockResolvedValue(false);
+    FileUtils.renameToFile.mockReset().mockResolvedValue(true);
+  });
+
+  test('companion files are the .mark annotations and the .sdr reading folder', () => {
+    expect(companionPaths('/A/Book.epub')).toEqual(['/A/Book.epub.mark', '/A/Book.sdr']);
+  });
+
+  test('a PDF moves together with its annotations and reading data', async () => {
+    const present = disk([pdf, `${pdf}.mark`, pdf.replace('.pdf', '.sdr'), week]);
+    const result = await moveFileToFolder(pdf, week);
+    expect(result.success).toBe(true);
+    expect(result.path).toBe(`${week}/Reading.pdf`);
+    expect([...present].sort()).toEqual([week, `${week}/Reading.pdf`, `${week}/Reading.pdf.mark`, `${week}/Reading.sdr`].sort());
+  });
+
+  test('nothing is overwritten', async () => {
+    const present = disk([pdf, week, `${week}/Reading.pdf`]);
+    const result = await moveFileToFolder(pdf, week);
+    expect(result.success).toBe(false);
+    expect(result.message).toContain('already has a file named Reading.pdf');
+    expect(present.has(pdf)).toBe(true);
+  });
+
+  test('a failed companion move puts the document back, so annotations are never separated', async () => {
+    const present = disk([pdf, `${pdf}.mark`, week]);
+    FileUtils.renameToFile.mockImplementation(async (from: string, to: string) => {
+      if (from.endsWith('.mark')) return false;
+      present.delete(from); present.add(to);
+      return true;
+    });
+    const result = await moveFileToFolder(pdf, week);
+    expect(result.success).toBe(false);
+    expect(present.has(pdf)).toBe(true);
+    expect(present.has(`${pdf}.mark`)).toBe(true);
+    expect(present.has(`${week}/Reading.pdf`)).toBe(false);
+  });
+
+  test('moving into the folder it is already in is refused', async () => {
+    disk([pdf, week]);
+    const result = await moveFileToFolder(`${week}/Reading.pdf`, week);
+    expect(result.success).toBe(false);
+  });
+});

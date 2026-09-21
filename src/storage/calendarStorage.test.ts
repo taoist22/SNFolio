@@ -888,3 +888,47 @@ test('unlink removes mapping aliases without queuing deletion or affecting other
   expect(store.getMapping('series')).toBeUndefined();
   expect(store.getMapping('other')?.notePath).toBe('/Note/Keep.note');
 });
+
+describe('failed loads never overwrite saved data', () => {
+  beforeEach(async () => { await AsyncStorage.clear(); });
+
+  test('a rejected read blocks every write and still loads independent records', async () => {
+    await AsyncStorage.setItem('@sn-calendar/tasks', JSON.stringify([{ uid: 'keep', title: 'Keep', completed: false }]));
+    await AsyncStorage.setItem('@sn-calendar/areas', JSON.stringify([{ id: 'area', name: 'Safe' }]));
+    const get = AsyncStorage.getItem as jest.Mock;
+    get.mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Read unavailable'));
+    const store = new CalendarStorage();
+    await store.load();
+    expect(store.isLoaded()).toBe(false);
+    expect(store.getAreas()[0].name).toBe('Safe');
+    const saved = await AsyncStorage.getItem('@sn-calendar/tasks');
+    store.updateSettings({ timeFormat: '24h' });
+    expect(await store.flush()).toContain('Read unavailable');
+    expect(await AsyncStorage.getItem('@sn-calendar/tasks')).toBe(saved);
+    expect(await AsyncStorage.getItem('@sn-calendar/settings')).toBeNull();
+    await store.load();
+    expect(store.isLoaded()).toBe(true);
+    expect(await store.flush()).toBe('');
+  });
+
+  test('malformed JSON remains untouched after later edits', async () => {
+    await AsyncStorage.setItem('@sn-calendar/tasks', '{truncated');
+    const store = new CalendarStorage();
+    await store.load();
+    store.updateSettings({ timeFormat: '24h' });
+    expect(await store.flush()).toContain('@sn-calendar/tasks');
+    expect(await AsyncStorage.getItem('@sn-calendar/tasks')).toBe('{truncated');
+  });
+
+  test('encrypted storage errors also prevent replacement of secrets and workspace', async () => {
+    const { NativeModules } = require('react-native');
+    NativeModules.CalendarFile.getSecret.mockRejectedValueOnce(new Error('Key unavailable'));
+    const store = new CalendarStorage();
+    await store.load();
+    const writes = NativeModules.CalendarFile.setSecret.mock.calls.length;
+    store.updateSettings({ timeFormat: '24h' });
+    expect(await store.flush()).toBe('Key unavailable');
+    expect(NativeModules.CalendarFile.setSecret.mock.calls.length).toBe(writes);
+    expect(await AsyncStorage.getItem('@sn-calendar/settings')).toBeNull();
+  });
+});

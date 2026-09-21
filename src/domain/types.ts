@@ -1,3 +1,4 @@
+import type { EventDesignation, ProjectCategory } from './eventDesignation';
 /**
  * 'para' is the Projects/Areas/Resources/Archive workspace. It is a peer of the calendar
  * views rather than a modal: it sat in the view switcher but opened an
@@ -44,6 +45,9 @@ export interface Area {
 export type ProjectStatus = 'active' | 'done' | 'archived';
 
 export interface Project {
+  category?: ProjectCategory;
+  /** Omitted: Class projects default to Class; other categories default to None. */
+  defaultEventDesignation?: EventDesignation;
   id: string;
   name: string;
   /** User-controlled order in the PARA project list; absent for legacy projects. */
@@ -53,6 +57,15 @@ export interface Project {
   /** The Area this project serves, if any. */
   areaId?: string;
   dueDate?: Date;
+  /** Class projects: the date of the first class. Week 1 is the week containing it. */
+  classStartDate?: Date;
+  /**
+   * Class projects: the weekday a class week begins (0 = Sunday). Absent means
+   * weeks run seven days from the class start date, whatever weekday that is.
+   */
+  classWeekStartsOn?: number;
+  /** Class projects: how Linked Files are listed. Absent means one flat list. */
+  linkedFilesGrouping?: 'none' | 'week';
   status: ProjectStatus;
   /**
    * Where this project's notes are filed, overriding the per-kind folder, and
@@ -96,6 +109,8 @@ export interface Resource {
  * alike rather than each carrying its own fields.
  */
 export interface ItemMembership {
+  /** Omitted follows the Project; explicit None suppresses its calendar marker. */
+  eventDesignation?: EventDesignation;
   areaId?: string;
   projectId?: string;
   /**
@@ -277,6 +292,8 @@ export interface CalendarFeed {
 }
 
 export interface CalendarSettings {
+  /** Explicit review is required before restored changes may synchronize. */
+  restoreSyncPaused?: boolean;
   feeds: CalendarFeed[];
   notesDirectory: string; // default: "/storage/emulated/0/Note/Meetings"
   defaultTemplate: string; // default: ""

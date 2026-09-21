@@ -97,7 +97,7 @@ export function CreateEventNoteModal({
                   try { await onLinkExisting(); } finally { setBusy(false); }
                 }}
               >
-                <Text allowFontScaling={false} style={styles.locationLabel}>Link Existing Note</Text>
+                <Text allowFontScaling={false} style={styles.locationLabel}>Link Existing Note / PDF</Text>
               </TouchableOpacity>
             )}
 

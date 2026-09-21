@@ -17,6 +17,8 @@ NativeModules.CalendarFile = {
     return true;
   }),
   readTextFile: jest.fn(async () => ''),
+  readBackupFile: jest.fn(async () => ''),
+  writeBackupFile: jest.fn(async path => path),
   storeImportedCalendar: jest.fn(async name => `/private/imports/${name}`),
   listNoteFiles: jest.fn(async () => []),
   listFolderEntries: jest.fn(async () => []),

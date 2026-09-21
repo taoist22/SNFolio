@@ -1,3 +1,4 @@
+import { LinkedFileMarker } from './LinkedFileMarker';
 import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -91,6 +92,7 @@ export function WeeklyReviewView({
             <View style={styles.rowBody}>
               <Text allowFontScaling={false} style={styles.rowTitle} numberOfLines={1}>{project.name}</Text>
               <Text allowFontScaling={false} style={styles.rowDetail} numberOfLines={1}>
+                {next && <LinkedFileMarker item={next} />}
                 {next
                   ? `Next: ${next.title}${next.dueDate ? ` · ${next.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ''}`
                   : 'No next task assigned'}
@@ -116,7 +118,7 @@ export function WeeklyReviewView({
             {task.dueDate?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </Text>
           <Text allowFontScaling={false} style={styles.rowTitle} numberOfLines={1}>
-            {project ? `${projectDisplayLabel(project)} — ` : ''}{task.title}
+            {project ? `${projectDisplayLabel(project)} — ` : ''}<LinkedFileMarker item={task} />{task.title}
           </Text>
           <Text allowFontScaling={false} style={styles.openText}>Edit ›</Text>
         </TouchableOpacity>

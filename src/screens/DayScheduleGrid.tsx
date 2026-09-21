@@ -1,3 +1,4 @@
+import { isPdfPath, LinkedFileMarker } from './LinkedFileMarker';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -55,7 +56,7 @@ export function DayScheduleGrid({
             ALL DAY
           </Text>
           <Text allowFontScaling={false} style={styles.allDayTitle} numberOfLines={1}>
-            {evt.summary}
+            <LinkedFileMarker item={evt} />{evt.summary}
           </Text>
         </TouchableOpacity>
       ))}
@@ -98,7 +99,7 @@ export function DayScheduleGrid({
             >
               <TouchableOpacity style={styles.blockBody} onPress={() => onEditEvent(event)}>
                 <Text allowFontScaling={false} style={styles.blockTitle} numberOfLines={1}>
-                  {event.summary}
+                  <LinkedFileMarker item={event} />{event.summary}
                 </Text>
                 {/* Each line only appears if it fits. Rendering all three in a
                     short block overflowed the box, and with the box clipped
@@ -120,7 +121,7 @@ export function DayScheduleGrid({
                   onPress={() => onNoteAction(event, existingPath)}
                 >
                   <Text allowFontScaling={false} style={styles.blockAction} numberOfLines={1}>
-                    {existingPath ? '📂 Open Note' : '📝 Create Note'}
+                    {existingPath ? (isPdfPath(existingPath) ? '📄 Open PDF' : '📂 Open Note') : '📝 Create Note'}
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.blockDeleteBtn} onPress={() => onDeleteEvent(event)}>

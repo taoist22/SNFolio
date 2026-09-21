@@ -1,0 +1,76 @@
+import { NativeModules } from 'react-native';
+import { FileUtils, RattaFileSelector } from 'sn-plugin-lib';
+import { CalendarStorage } from '../storage/calendarStorage';
+import { parseWorkspaceBackup, WorkspaceBackup } from '../storage/workspaceBackup';
+import { firstPickedFilePath } from '../domain/fileSelection';
+import { ensureFileReadPermission, ensureFileWritePermission } from './pluginPermissions';
+
+const native = NativeModules.CalendarFile;
+async function permissions(write = false): Promise<void> {
+  if (!(await ensureFileReadPermission()) || (write && !(await ensureFileWritePermission()))) {
+    throw new Error('File access was not allowed.');
+  }
+  if (!native?.readBackupFile || !native?.writeBackupFile || !native?.storeImportedCalendar) {
+    throw new Error('Backup support is missing from this build. Install the complete SNFolio plugin package.');
+  }
+}
+
+export async function createWorkspaceBackup(store: CalendarStorage, safety = false): Promise<string> {
+  await permissions(true);
+  const data = await store.exportWorkspace();
+  const imports: Record<string, string> = {};
+  for (const feed of data.settings.feeds) {
+    if (feed.localPath) imports[feed.id] = await native.readBackupFile(feed.localPath);
+  }
+  const backup: WorkspaceBackup = { format: 'snfolio-workspace', version: 1,
+    createdAt: new Date().toISOString(), data, imports };
+  const content = JSON.stringify(backup);
+  parseWorkspaceBackup(content);
+  let root = '/storage/emulated/0/Export';
+  try { root = await FileUtils.getExportPath() || root; } catch (_) { /* Older firmware. */ }
+  const stamp = backup.createdAt.replace(/[:.]/g, '-');
+  const suffix = Math.random().toString(36).slice(2, 10);
+  const path = await native.writeBackupFile(`${root}/SNFolio Backups/${safety ? 'before-restore' : 'workspace'}-${stamp}-${suffix}.snfolio.json`, content);
+  // Do not authorize a restore based merely on a successful write response.
+  const verified = await native.readBackupFile(path);
+  if (verified !== content) throw new Error('Backup verification failed. The workspace has not been restored.');
+  parseWorkspaceBackup(verified);
+  return path;
+}
+
+export async function selectWorkspaceBackup(): Promise<WorkspaceBackup | null> {
+  await permissions();
+  const result = await RattaFileSelector.selectFile({ selectType: 0, maxNum: 1,
+    title: 'Select an SNFolio backup', rightButtonText: 'Review',
+    needSelectFolder: '/storage/emulated/0/Export', suffixList: ['json'] });
+  const path = firstPickedFilePath(result);
+  if (!path) return null;
+  return parseWorkspaceBackup(await native.readBackupFile(path));
+}
+
+export async function missingBackupNotes(backup: WorkspaceBackup): Promise<string[]> {
+  const paths = [...new Set<string>(Object.values(backup.data.mappings).map((mapping: any) => mapping.notePath))];
+  const missing: string[] = [];
+  for (const path of paths) {
+    // A failed check must be visible rather than reporting a file as present.
+    if (!(await FileUtils.exists(path))) missing.push(path);
+  }
+  return missing;
+}
+
+export async function restoreWorkspaceBackup(
+  store: CalendarStorage, backup: WorkspaceBackup, onSafetyBackup: (path: string) => void,
+): Promise<string> {
+  const validated = parseWorkspaceBackup(JSON.stringify(backup));
+  // Export refuses an incomplete load. Never replace a workspace we cannot back up.
+  const safetyPath = await createWorkspaceBackup(store, true);
+  onSafetyBackup(safetyPath);
+  const data = validated.data;
+  for (const [index, feed] of data.settings.feeds.entries()) {
+    if (feed.localPath) {
+      feed.localPath = await native.storeImportedCalendar(`restored-${index}-${Date.now()}-${feed.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.ics`, validated.imports[feed.id]);
+    }
+  }
+  await store.restoreWorkspace(data);
+  return safetyPath;
+}

@@ -1,3 +1,4 @@
+import { isPdfPath } from './LinkedFileMarker';
 import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
@@ -64,14 +65,14 @@ export function EventDetailsModal({
               controls. Details is therefore the universal route to an event
               note, regardless of duration, recurrence, or source calendar. */}
           {onLinkNote && <TouchableOpacity style={styles.noteAction} onPress={() => onLinkNote(event)}>
-            <Text allowFontScaling={false}>{notePath ? 'Change Link…' : 'Link Note…'}</Text>
+            <Text allowFontScaling={false}>{notePath ? 'Change Link…' : 'Link Note / PDF…'}</Text>
           </TouchableOpacity>}
           {notePath && onUnlinkNote && <TouchableOpacity style={styles.noteAction} onPress={() => onUnlinkNote(event)}>
             <Text allowFontScaling={false}>Unlink</Text>
           </TouchableOpacity>}
           <TouchableOpacity style={styles.noteAction} onPress={() => onNoteAction(event, notePath)}>
             <Text allowFontScaling={false} style={styles.noteActionText}>
-              {notePath ? '📂 Open Note' : '📝 Create Note'}
+              {notePath ? (isPdfPath(notePath) ? '📄 Open PDF' : '📂 Open Note') : '📝 Create Note'}
             </Text>
           </TouchableOpacity>
 

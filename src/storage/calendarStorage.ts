@@ -1,3 +1,5 @@
+import { pausedWorkspace, WorkspaceData, validateWorkspaceData } from './workspaceBackup';
+import { commitWorkspaceRestore, recoverWorkspaceRestore } from './restoreTransaction';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
 import { CalendarEvent, CalendarFeed, CalendarSettings, CalendarTask, MeetingNoteMapping, NoteKind, Area, EventType, Project, Resource, ItemMembership, PendingTaskDelete } from '../domain/types';
@@ -152,6 +154,7 @@ function reviveEvent(raw: any): CalendarEvent {
     ...raw,
     start: new Date(raw.start),
     end: new Date(raw.end),
+    recurrenceId: raw.recurrenceId ? new Date(raw.recurrenceId) : undefined,
   };
 }
 
@@ -169,6 +172,7 @@ function reviveProject(raw: any): Project {
       (legacyPath && legacySlash > 0 ? legacyPath.slice(0, legacySlash) : undefined),
     status: raw.status || 'active',
     dueDate: raw.dueDate ? new Date(raw.dueDate) : undefined,
+    classStartDate: raw.classStartDate ? new Date(raw.classStartDate) : undefined,
     completedAt: raw.completedAt ? new Date(raw.completedAt) : undefined,
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
   };
@@ -236,30 +240,60 @@ export class CalendarStorage {
    */
   private pendingDeletes: string[] = [];
   private loaded = false;
+  private loadFailure = '';
+  private loading = false;
   private lastPersistenceError = '';
   /** Native storage writes must not race when several settings change quickly. */
   private saveChain: Promise<void> = Promise.resolve();
 
   async load(): Promise<{ settings: CalendarSettings; mappings: Record<string, MeetingNoteMapping> }> {
+    await this.saveChain;
+    Object.assign(this, new CalendarStorage());
+    this.loading = true;
+    this.loaded = false;
+    this.loadFailure = '';
+    this.lastPersistenceError = '';
     let shouldSaveAreaMigration = false;
+    // Keep valid independent datasets readable, but never write a partial load.
+    const read = async (key: string): Promise<string | null> => {
+      try {
+        const raw = await AsyncStorage.getItem(key);
+        if (raw !== null) {
+          const value = JSON.parse(raw);
+          const arrays = [USER_EVENTS_KEY, TASKS_KEY, CALDAV_EVENTS_KEY, AREAS_KEY,
+            PROJECTS_KEY, RESOURCES_KEY, PENDING_DELETES_KEY, EVENT_TYPES_KEY, PENDING_TASK_DELETES_KEY];
+          if (arrays.includes(key) ? !Array.isArray(value) : !value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new Error('Invalid saved data');
+          }
+        }
+        return raw;
+      } catch (error: any) {
+        this.loadFailure = `Could not load ${key}: ${error?.message || 'storage read failed'}`;
+        return null;
+      }
+    };
     try {
+      if (await recoverWorkspaceRestore()) {
+        clearSessionPassword();
+        clearSessionTaskPassword();
+      }
       const [rawSettings, rawMappings, rawEvents, rawTasks, rawPushState, rawTaskPushState, rawCaldavEvents, rawEventKinds, rawAreas, rawProjects, rawResources, rawMembership, rawPendingDeletes, rawEventTypes, rawPendingTaskDeletes] =
         await Promise.all([
-        AsyncStorage.getItem(SETTINGS_KEY),
-        AsyncStorage.getItem(MAPPINGS_KEY),
-        AsyncStorage.getItem(USER_EVENTS_KEY),
-        AsyncStorage.getItem(TASKS_KEY),
-        AsyncStorage.getItem(PUSH_STATE_KEY),
-        AsyncStorage.getItem(TASK_PUSH_STATE_KEY),
-        AsyncStorage.getItem(CALDAV_EVENTS_KEY),
-        AsyncStorage.getItem(EVENT_KINDS_KEY),
-        AsyncStorage.getItem(AREAS_KEY),
-        AsyncStorage.getItem(PROJECTS_KEY),
-        AsyncStorage.getItem(RESOURCES_KEY),
-        AsyncStorage.getItem(MEMBERSHIP_KEY),
-        AsyncStorage.getItem(PENDING_DELETES_KEY),
-        AsyncStorage.getItem(EVENT_TYPES_KEY),
-        AsyncStorage.getItem(PENDING_TASK_DELETES_KEY),
+        read(SETTINGS_KEY),
+        read(MAPPINGS_KEY),
+        read(USER_EVENTS_KEY),
+        read(TASKS_KEY),
+        read(PUSH_STATE_KEY),
+        read(TASK_PUSH_STATE_KEY),
+        read(CALDAV_EVENTS_KEY),
+        read(EVENT_KINDS_KEY),
+        read(AREAS_KEY),
+        read(PROJECTS_KEY),
+        read(RESOURCES_KEY),
+        read(MEMBERSHIP_KEY),
+        read(PENDING_DELETES_KEY),
+        read(EVENT_TYPES_KEY),
+        read(PENDING_TASK_DELETES_KEY),
       ]);
 
       if (rawSettings) {
@@ -270,7 +304,10 @@ export class CalendarStorage {
       if (secureStore?.getSecret) {
         try {
           const secureRaw = await secureStore.getSecret(SECURE_CONNECTIONS_KEY);
-          const secure = parseStored(secureRaw);
+          const secure = secureRaw === null ? null : JSON.parse(secureRaw);
+          if (secureRaw !== null && (!secure || typeof secure !== 'object' || Array.isArray(secure))) {
+            throw new Error('Invalid encrypted calendar connections.');
+          }
           if (secure) {
             const urls = secure.feedUrls || {};
             this.settings.feeds = this.settings.feeds.map(feed => ({ ...feed, url: urls[feed.id] }));
@@ -280,7 +317,7 @@ export class CalendarStorage {
             if (secure.taskCaldavPassword) setSessionTaskPassword(secure.taskCaldavPassword);
           }
         } catch (e: any) {
-          this.lastPersistenceError = e?.message || 'Could not read encrypted calendar connections.';
+          this.loadFailure = e?.message || 'Could not read encrypted calendar connections.';
         }
       }
       if (rawMappings) {
@@ -385,7 +422,7 @@ export class CalendarStorage {
           const known = new Set(this.tasks.map(t => t.uid));
           const migrated = legacy.filter(e => !known.has(e.uid)).map(taskFromLegacyEvent);
           this.tasks = [...this.tasks, ...migrated];
-          void this.save();
+          shouldSaveAreaMigration = true;
         }
       }
 
@@ -408,15 +445,17 @@ export class CalendarStorage {
     } catch (e: any) {
       // Preserve whatever was already loaded. One unavailable storage read must
       // not reset every independent data set to defaults.
-      this.lastPersistenceError = e?.message || 'Could not read plugin storage.';
+      this.loadFailure = e?.message || 'Could not read plugin storage.';
     }
 
     // Restored from encrypted native storage when available, otherwise held
     // only in this process's session memory.
     this.settings.caldavPassword = sessionPassword;
     this.settings.taskCaldavPassword = sessionTaskPassword;
-    this.loaded = true;
-    if (shouldSaveAreaMigration) await this.save();
+    this.loading = false;
+    this.loaded = !this.loadFailure;
+    this.lastPersistenceError = this.loadFailure;
+    if (shouldSaveAreaMigration && this.loaded) await this.save();
 
     return { settings: this.settings, mappings: this.mappings };
   }
@@ -426,6 +465,8 @@ export class CalendarStorage {
   }
 
   private save(): Promise<void> {
+    // Migration writes are deferred until every read has succeeded.
+    if (this.loading || this.loadFailure) return Promise.resolve();
     const operation = this.saveChain.then(
       () => this.performSave(),
       () => this.performSave(),
@@ -435,6 +476,10 @@ export class CalendarStorage {
   }
 
   private async performSave(): Promise<void> {
+    if (this.loading || this.loadFailure) {
+      this.lastPersistenceError = this.loadFailure || 'Storage is still loading.';
+      return;
+    }
     try {
       // Strip the password on the way out. updateSettings already diverts it to
       // module scope; this is the second guard, so a future call site that sets
@@ -496,6 +541,45 @@ export class CalendarStorage {
 
   getPersistenceError(): string {
     return this.lastPersistenceError;
+  }
+
+  async exportWorkspace(): Promise<WorkspaceData> {
+    if (!this.loaded || this.loadFailure || this.loading) throw new Error('A complete workspace must load successfully before backup.');
+    const error = await this.flush();
+    if (error) throw new Error(error);
+    const settings = { ...this.settings };
+    delete settings.caldavPassword;
+    delete settings.taskCaldavPassword;
+    delete settings.caldavCustomUrl;
+    delete settings.taskCaldavServerUrl;
+    const data: WorkspaceData = JSON.parse(JSON.stringify({
+      settings: { ...settings, feeds: settings.feeds.map(feed => {
+        const portable = { ...feed };
+        delete portable.url;
+        return portable;
+      }) },
+      mappings: this.mappings, userEvents: this.userEvents, tasks: this.tasks,
+      caldavPushState: this.pushState, caldavTaskPushState: this.taskPushStates,
+      pendingTaskDeletes: this.pendingTaskDeletes, caldavEvents: this.caldavEvents,
+      eventKinds: this.eventKinds, areas: this.areas, projects: this.projects,
+      resources: this.resources, itemMembership: this.membership,
+      pendingNoteDeletes: this.pendingDeletes, eventTypes: this.eventTypes,
+    }));
+    validateWorkspaceData(data);
+    return data;
+  }
+
+  async restoreWorkspace(data: WorkspaceData): Promise<void> {
+    validateWorkspaceData(data);
+    await this.saveChain;
+    this.loaded = false;
+    this.loadFailure = 'A restore is in progress. Close and reopen SNFolio to finish recovery.';
+    this.lastPersistenceError = this.loadFailure;
+    await commitWorkspaceRestore(pausedWorkspace(data));
+    clearSessionPassword();
+    clearSessionTaskPassword();
+    await this.load();
+    if (!this.loaded) throw new Error(this.getPersistenceError());
   }
 
   getSettings(): CalendarSettings {
@@ -821,7 +905,7 @@ export class CalendarStorage {
     const merged = { ...this.getMembership(identity), ...entry };
     // Dropping empty entries keeps the store from growing a row per item that
     // was assigned and then cleared.
-    if (!merged.areaId && !merged.projectId && !merged.typeId) delete this.membership[identity];
+    if (!merged.areaId && !merged.projectId && !merged.typeId && !merged.eventDesignation) delete this.membership[identity];
     else this.membership[identity] = merged;
     void this.save();
   }

@@ -1,9 +1,11 @@
+import { EventDesignation } from '../domain/eventDesignation';
+import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
 import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { allocateCellRows, generateMonthGrid, MonthGridCell } from '../domain/monthGrid';
-import { CalendarEvent, CalendarTask, NoteKind } from '../domain/types';
+import { CalendarEvent, CalendarTask } from '../domain/types';
 import { tasksForCalendarDay } from '../domain/taskFilters';
 import { dateKey } from '../domain/dailyNote';
 import { noteIdentity } from '../domain/meetingSnapshot';
@@ -20,11 +22,6 @@ interface MonthGridViewProps {
    * AgendaScreen, which owns the note logic; this view only draws the result.
    */
   dailyNoteDates?: Set<string>;
-  /**
-   * Note kind per event uid, from the stored mappings. Mappings written before
-   * kinds were recorded map to undefined and show the neutral glyph.
-   */
-  noteKindByEvent?: Record<string, NoteKind | undefined>;
   onSelectDate: (date: Date) => void;
   onOpenActionSheet?: (date: Date) => void;
 }
@@ -51,46 +48,26 @@ const CELL_CHROME_HEIGHT = 43;
 const SNIPPET_ROW_HEIGHT = 14;
 
 
-/**
- * Which note glyphs a cell shows: D for the day's journal note, M and C for
- * meeting and class notes on that day's events, N for notes created before
- * kinds were recorded.
- *
- * One glyph per kind however many notes there are — three characters is
- * already a third of a Nomad cell's width.
- */
+/** Aggregate markers include items hidden behind the cell's overflow count. */
 function cellNoteBadges(
   cell: MonthGridCell,
-  dailyNoteDates?: Set<string>,
-  noteKindByEvent?: Record<string, NoteKind | undefined>
+  dailyNoteDates: Set<string> | undefined,
+  paths: Record<string, string | undefined>,
+  kinds: Record<string, EventDesignation>,
+  tasks: CalendarTask[],
 ): string[] {
-  const badges: string[] = [];
-
-  if (cell.isCurrentMonth && dailyNoteDates?.has(dateKey(cell.date))) {
-    badges.push('D');
+  const badges = new Set<string>();
+  if (cell.isCurrentMonth && dailyNoteDates?.has(dateKey(cell.date))) badges.add('D');
+  for (const item of [...cell.events, ...tasks]) {
+    const kind = kinds[noteIdentity(item)];
+    if (kind === 'class') badges.add('C');
+    if (kind === 'meeting') badges.add('M');
   }
-
-  if (noteKindByEvent) {
-    let meeting = false;
-    let klass = false;
-    let unknown = false;
-
-    for (const evt of cell.events) {
-      // Occurrences carry a per-instance uid; kinds are held on the series.
-      const identity = noteIdentity(evt);
-      if (!(identity in noteKindByEvent)) continue;
-      const kind = noteKindByEvent[identity];
-      if (kind === 'meeting') meeting = true;
-      else if (kind === 'class') klass = true;
-      else if (kind !== 'daily') unknown = true;
-    }
-
-    if (meeting) badges.push('M');
-    if (klass) badges.push('C');
-    if (unknown) badges.push('N');
+  for (const item of [...cell.events, ...tasks]) {
+    const path = paths[noteIdentity(item)];
+    if (path) badges.add(/\.pdf$/i.test(path) ? 'PDF' : 'N');
   }
-
-  return badges;
+  return [...badges];
 }
 
 export function MonthGridView({
@@ -100,10 +77,11 @@ export function MonthGridView({
   allTasks = [],
   weekStartsOn = 0,
   dailyNoteDates,
-  noteKindByEvent,
   onSelectDate,
   onOpenActionSheet,
 }: MonthGridViewProps): React.JSX.Element {
+  const paths = React.useContext(LinkedFilePathsContext);
+  const kinds = React.useContext(EventDesignationsContext);
   const timeFormat = useTimeFormat();
   const windowHeight = Dimensions.get('window').height;
   const dynamicCellHeight = Math.max(90, Math.min(140, Math.floor((windowHeight - 260) / 6)));
@@ -149,7 +127,7 @@ export function MonthGridView({
             const isSelected = isSameDay(cell.date, selectedDate);
             const dayTasks = tasksForCalendarDay(allTasks, cell.date);
             const rows = allocateCellRows(cell.events.length, dayTasks.length, rowBudget, EVENT_CAP);
-            const badges = cellNoteBadges(cell, dailyNoteDates, noteKindByEvent);
+            const badges = cellNoteBadges(cell, dailyNoteDates, paths, kinds, dayTasks);
 
             return (
               <TouchableOpacity
@@ -196,7 +174,7 @@ export function MonthGridView({
                         style={[styles.eventSnippetText, isSelected && styles.selectedEventSnippetText]}
                         numberOfLines={1}
                       >
-                        • {timeStr} {evt.summary}
+                        • {timeStr} <LinkedFileMarker item={evt} />{evt.summary}
                       </Text>
                     );
                   })}
@@ -226,7 +204,7 @@ export function MonthGridView({
                             ]}
                             numberOfLines={1}
                           >
-                            {`${statusGlyph(taskStatus(t))} ${taskRowLabel(t)}`}
+                            <LinkedFileMarker item={t} />{`${statusGlyph(taskStatus(t))} ${taskRowLabel(t)}`}
                           </Text>
                         ))}
                         {rows.moreTasksLine && (
@@ -387,16 +365,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   noteBadge: {
-    fontSize: 11,
-    marginRight: 3,
+    fontSize: 9,
+    marginRight: 2,
     fontWeight: 'bold',
     color: '#000000',
     backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: '#000000',
     borderRadius: 3,
-    paddingHorizontal: 3,
-    lineHeight: 13,
+    paddingHorizontal: 2,
+    lineHeight: 12,
     // Required for borderRadius to clip the background on Text.
     overflow: 'hidden',
   },

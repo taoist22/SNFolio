@@ -1,3 +1,8 @@
+import { EventDesignation, resolveEventDesignation, resolveTaskDesignation } from '../domain/eventDesignation';
+import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderName } from '../domain/linkedFileWeeks';
+import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
+import { useWorkspaceActivity } from './useWorkspaceActivity';
+import { WorkspaceBackupPanel } from './WorkspaceBackupPanel';
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
 import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import { SettingChoice } from './SettingChoice';
@@ -130,7 +135,7 @@ import { hourLabel } from '../domain/dayGrid';
 import { ItemCreationModal } from './ItemCreationModal';
 import { EventDetailsModal } from './EventDetailsModal';
 import { DatePickerModal } from './DatePickerModal';
-import { listParaFolderEntries, moveParaFolder, openNoteInEditor, openResourceFile, ParaFolderEntry } from '../supernote/exportService';
+import { listParaFolderEntries, moveFileToFolder, moveParaFolder, openNoteInEditor, openResourceFile, ParaFolderEntry } from '../supernote/exportService';
 import {
   ensureFileReadPermission,
   ensureInternetPermission,
@@ -208,7 +213,12 @@ function countPendingSyncItems(): number {
   return count;
 }
 
-export function AgendaScreen(): React.JSX.Element {
+export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice = '' }: {
+  onWorkspaceRestored?: (message: string) => void; workspaceNotice?: string;
+} = {}): React.JSX.Element {
+  const { busy: workspaceBusy, track: trackWorkspaceOperation } = useWorkspaceActivity();
+  const [showWorkspaceBackup, setShowWorkspaceBackup] = useState(false);
+  const [storageLoadError, setStorageLoadError] = useState('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [calendarMode, setCalendarMode] = useState<'month' | 'week'>('month');
@@ -324,6 +334,8 @@ export function AgendaScreen(): React.JSX.Element {
   const [eventTypes, setEventTypes] = useState<EventType[]>([]);
   /** Project whose due date is being picked, if any. */
   const [projectDueTarget, setProjectDueTarget] = useState<Project | null>(null);
+  /** The project date the picker sets: the due date, or a class's start date. */
+  const [projectDateField, setProjectDateField] = useState<'dueDate' | 'classStartDate'>('dueDate');
   /** Project open in the detail view; null shows the browser. */
   const [openProject, setOpenProject] = useState<Project | null>(null);
   /** Confirmation before a PARA status change optionally moves user files. */
@@ -340,7 +352,6 @@ export function AgendaScreen(): React.JSX.Element {
   /** Bumped when membership changes, so the list and pickers re-read. */
   const [membershipRevision, setMembershipRevision] = useState<number>(0);
   /** Note kind per event uid, for the month grid's M/C badges. */
-  const [noteKindByEvent, setNoteKindByEvent] = useState<Record<string, NoteKind | undefined>>({});
   // Note paths found on disk for the day's events, keyed by event uid. The
   // stored mapping is not enough: it is lost if a note was made outside the
   // plugin or the mapping never got written, and the row would then offer
@@ -365,6 +376,10 @@ export function AgendaScreen(): React.JSX.Element {
     // synchronous cache read and returns defaults until load() resolves.
     await calendarStorage.load();
     if (cancelled) return;
+    if (!calendarStorage.isLoaded()) {
+      setStorageLoadError(calendarStorage.getPersistenceError());
+      return;
+    }
 
     const settings = calendarStorage.getSettings();
     if (settings.taskCaldavCollectionUrl && !settings.taskCaldavLocalEnrollmentDone) {
@@ -606,6 +621,10 @@ export function AgendaScreen(): React.JSX.Element {
   const [folderDrafts, setFolderDrafts] = useState<Partial<Record<ConfigurableNoteKind, string>>>({});
   const [folderPickerTarget, setFolderPickerTarget] = useState<ConfigurableNoteKind | ParaRootKind | null>(null);
   const [paraImportKind, setParaImportKind] = useState<ParaRootKind | null>(null);
+  /** PARA → + Existing Folder…: the kind of item the browsed folder becomes. */
+  const [existingFolderKind, setExistingFolderKind] = useState<'project' | 'area' | 'resource' | null>(null);
+  /** Bumped after SNFolio changes a project's folders, so its file panel reads them again. */
+  const [paraFilesRevision, setParaFilesRevision] = useState(0);
   const [paraImportFolders, setParaImportFolders] = useState<ParaFolderEntry[]>([]);
   const [systemTemplates, setSystemTemplates] = useState<SystemTemplate[]>([]);
   /** Bumped on every template/folder write so the settings rows re-read. */
@@ -636,7 +655,10 @@ export function AgendaScreen(): React.JSX.Element {
    * plugin, since Google CalDAV needs OAuth; this runs on open and again
    * whenever Sync Now is pressed.
    */
-  const refreshFeeds = async (): Promise<{ configured: number; successful: number; failed: number; events: number }> => {
+  const refreshFeeds = trackWorkspaceOperation(async (): Promise<{ configured: number; successful: number; failed: number; events: number }> => {
+    if (calendarStorage.getSettings().restoreSyncPaused || !calendarStorage.isLoaded()) {
+      return { configured: 0, successful: 0, failed: 0, events: 0 };
+    }
 
     const settings = calendarStorage.getSettings();
     const savedFeeds = settings.feeds || [];
@@ -704,7 +726,7 @@ export function AgendaScreen(): React.JSX.Element {
     // back on the next launch while making the Remove button appear broken.
     // Keep the user's file untouched so it can be reused for test installs.
     return { configured: 0, successful: 0, failed: 0, events: fetched.length };
-  };
+  });
 
   /**
    * Uploads user events that are new or edited since their last successful
@@ -713,12 +735,15 @@ export function AgendaScreen(): React.JSX.Element {
    * Deliberately does no discovery: re-running the principal lookup on every
    * sync cost several round trips to rediscover a URL already in settings.
    */
-  const pushPendingItems = async (): Promise<{
+  const pushPendingItems = trackWorkspaceOperation(async (): Promise<{
     pushed: number;
     attempted: number;
     error: string;
   }> => {
     const settings = calendarStorage.getSettings();
+    if (settings.restoreSyncPaused || !calendarStorage.isLoaded()) {
+      return { pushed: 0, attempted: 0, error: 'Workspace synchronization is paused.' };
+    }
     const collectionUrl = settings.caldavCalendarUrl;
 
     const eventReady = Boolean(
@@ -837,7 +862,7 @@ export function AgendaScreen(): React.JSX.Element {
     }
 
     return { pushed, attempted: pending.length + taskDeleteAttempts, error };
-  };
+  });
 
   /**
    * Moves a schedule bound, keeping at least an hour of grid between them and
@@ -855,7 +880,7 @@ export function AgendaScreen(): React.JSX.Element {
     }
   };
 
-  const handleRunDiagnostics = async () => {
+  const handleRunDiagnostics = trackWorkspaceOperation(async () => {
     const appleId = (caldavAppleIdInputRef.current?.getValue() ?? caldavAppleId).trim();
     const password = (caldavPasswordInputRef.current?.getValue() ?? caldavPassword).trim();
     const customUrl = (caldavCustomUrlInputRef.current?.getValue() ?? caldavCustomUrl).trim();
@@ -876,9 +901,13 @@ export function AgendaScreen(): React.JSX.Element {
     });
     setDiagLogs(logs);
     setStatusMsg(`Diagnostic completed (${logs.length} trace steps recorded).`);
-  };
+  });
 
-  const handleTestCaldavConnection = async () => {
+  const handleTestCaldavConnection = trackWorkspaceOperation(async () => {
+    if (calendarStorage.getSettings().restoreSyncPaused) {
+      setStatusMsg('Review the restored workspace in Help & Setup before reconnecting.');
+      return;
+    }
     const appleId = (caldavAppleIdInputRef.current?.getValue() ?? caldavAppleId).trim();
     const password = (caldavPasswordInputRef.current?.getValue() ?? caldavPassword).trim();
     const customUrl = (caldavCustomUrlInputRef.current?.getValue() ?? caldavCustomUrl).trim();
@@ -933,9 +962,9 @@ export function AgendaScreen(): React.JSX.Element {
     } else {
       setStatusMsg(`CalDAV Connection Failed: ${res.message}`);
     }
-  };
+  });
 
-  const activateTaskCollection = async (
+  const activateTaskCollection = trackWorkspaceOperation(async (
     collection: CalendarCollection,
     credentials?: { serverUrl: string; username: string; password: string }
   ) => {
@@ -974,9 +1003,13 @@ export function AgendaScreen(): React.JSX.Element {
         : '') +
       'Tap Sync Now when you are ready.'
     );
-  };
+  });
 
-  const handleTestTaskCaldavConnection = async () => {
+  const handleTestTaskCaldavConnection = trackWorkspaceOperation(async () => {
+    if (calendarStorage.getSettings().restoreSyncPaused) {
+      setStatusMsg('Review the restored workspace in Help & Setup before reconnecting.');
+      return;
+    }
     const serverUrl = (taskServerInputRef.current?.getValue() ?? taskCaldavServerUrl).trim();
     const username = (taskUsernameInputRef.current?.getValue() ?? taskCaldavUsername).trim();
     const password = (taskPasswordInputRef.current?.getValue() ?? taskCaldavPassword).trim();
@@ -1026,18 +1059,22 @@ export function AgendaScreen(): React.JSX.Element {
       return;
     }
     await activateTaskCollection(lists[0], { serverUrl, username, password });
-  };
+  });
 
-  const handlePauseTaskCaldav = async () => {
+  const handlePauseTaskCaldav = trackWorkspaceOperation(async () => {
     setTaskCaldavEnabled(false);
     calendarStorage.updateSettings({
       taskCaldavEnabled: false,
     });
     await calendarStorage.flush();
     setStatusMsg('Task synchronization paused. Account details, tasks, and pending changes were kept.');
-  };
+  });
 
-  const handleResumeTaskCaldav = async () => {
+  const handleResumeTaskCaldav = trackWorkspaceOperation(async () => {
+    if (calendarStorage.getSettings().restoreSyncPaused) {
+      setStatusMsg('Review the restored workspace in Help & Setup before reconnecting.');
+      return;
+    }
     if (!taskCaldavCollectionUrl || !taskCaldavUsername || !taskCaldavPassword) {
       setStatusMsg('Re-enter the account password and connect again to resume task synchronization.');
       return;
@@ -1046,9 +1083,9 @@ export function AgendaScreen(): React.JSX.Element {
     calendarStorage.updateSettings({ taskCaldavEnabled: true });
     await calendarStorage.flush();
     setStatusMsg('Task synchronization resumed. Tap Sync Now to reconcile pending changes.');
-  };
+  });
 
-  const handleRemoveTaskAccount = async (removeLocalTasks: boolean) => {
+  const handleRemoveTaskAccount = trackWorkspaceOperation(async (removeLocalTasks: boolean) => {
     const collectionUrl = taskCaldavCollectionUrl;
     const removed = removeLocalTasks && collectionUrl
       ? calendarStorage.removeSyncedTasks(collectionUrl)
@@ -1081,9 +1118,9 @@ export function AgendaScreen(): React.JSX.Element {
           ? `Task account removed. Removed ${removed.length} local synchronized task(s); the server was unchanged.`
           : 'Task account removed. Local tasks were kept; the server was unchanged.'
     );
-  };
+  });
 
-  const handleClearSyncedTasks = async () => {
+  const handleClearSyncedTasks = trackWorkspaceOperation(async () => {
     if (taskCaldavCollectionUrl) {
       setConfirmClearSyncedTasks(false);
       setStatusMsg('Remove the task account before clearing its local synchronized tasks.');
@@ -1100,9 +1137,9 @@ export function AgendaScreen(): React.JSX.Element {
         ? `Removed ${removed.length} synced task(s) from this session, but could not save: ${persistenceError}`
         : `Removed ${removed.length} synced task(s) from SNFolio. The remote account was not changed.`
     );
-  };
+  });
 
-  const handleEnrollLocalTasks = async () => {
+  const handleEnrollLocalTasks = trackWorkspaceOperation(async () => {
     const enrolled = calendarStorage.enrollDeviceOnlyTasksForSync();
     setTasks([...calendarStorage.getTasks()]);
     setConfirmEnrollLocalTasks(false);
@@ -1113,7 +1150,7 @@ export function AgendaScreen(): React.JSX.Element {
         ? `Selected ${enrolled} local task(s), but could not save: ${persistenceError}`
         : `${enrolled} existing device task(s) are now eligible for the active task account. Tap Sync Now to upload them.`
     );
-  };
+  });
 
   /**
    * Pulls events down from CalDAV.
@@ -1126,7 +1163,7 @@ export function AgendaScreen(): React.JSX.Element {
    * Uses the collection already saved by Test Connection, so a routine sync
    * costs one request instead of re-running principal discovery.
    */
-  const handlePullCaldavEvents = async (
+  const handlePullCaldavEvents = trackWorkspaceOperation(async (
     options: { silent?: boolean } = {}
   ): Promise<{ configured: boolean; success: boolean; count: number; error?: string }> => {
     const { silent = false } = options;
@@ -1236,10 +1273,10 @@ export function AgendaScreen(): React.JSX.Element {
     if (removed.length > 0) parts.push(`Removed ${removed.length} deleted elsewhere.`);
     if (!silent) setStatusMsg(parts.join(' '));
     return { configured: true, success: true, count: incoming.length };
-  };
+  });
 
   /** Pulls VTODO tasks from the independently configured task account. */
-  const handlePullCaldavTasks = async (
+  const handlePullCaldavTasks = trackWorkspaceOperation(async (
     options: { silent?: boolean } = {}
   ): Promise<{ configured: boolean; success: boolean; count: number; error?: string }> => {
     const { silent = false } = options;
@@ -1293,7 +1330,7 @@ export function AgendaScreen(): React.JSX.Element {
     setTasks([...calendarStorage.getTasks()]);
     if (!silent) setStatusMsg(`Read ${remote.tasks.length} task(s) from the external task account.`);
     return { configured: true, success: true, count: remote.tasks.length };
-  };
+  });
 
   /**
    * Sync Now: refresh everything the plugin knows about, in one press.
@@ -1307,7 +1344,7 @@ export function AgendaScreen(): React.JSX.Element {
    * them, so an item is never judged missing merely because it had not been
    * uploaded yet.
    */
-  const handleSyncNow = async () => {
+  const handleSyncNow = trackWorkspaceOperation(async () => {
     if (!(await ensureInternetPermission())) {
       setStatusMsg('Internet access was not allowed.');
       setSyncPhase('error');
@@ -1378,14 +1415,14 @@ export function AgendaScreen(): React.JSX.Element {
     } else {
       setStatusMsg(`Sync ${phase === 'partial' ? 'completed with warnings' : 'failed'}. Open Calendar & Sync for details.`);
     }
-  };
+  });
 
   /**
    * Picks a .txt off the device and subscribes to every calendar URL in it,
    * one per line. Saves the hassle of typing a long iCal secret address into
    * a text box on an e-ink keyboard.
    */
-  const handleImportFeedsFromTxt = async () => {
+  const handleImportFeedsFromTxt = trackWorkspaceOperation(async () => {
     try {
       if (!(await ensureFileReadPermission())) {
         setStatusMsg('File access was not allowed.');
@@ -1554,7 +1591,7 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Import failed: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
   /**
    * Reports what the device actually offers, rather than what we assume.
@@ -1584,7 +1621,7 @@ export function AgendaScreen(): React.JSX.Element {
     };
   }, []);
 
-  const handleProbeDevice = async () => {
+  const handleProbeDevice = trackWorkspaceOperation(async () => {
     const lines: string[] = [];
 
     const win = Dimensions.get('window');
@@ -1617,7 +1654,7 @@ export function AgendaScreen(): React.JSX.Element {
 
     setTemplateProbe(lines);
     setStatusMsg(`Probe complete (${lines.length} lines).`);
-  };
+  });
 
   const noteTemplateFor = (kind: ConfigurableNoteKind): string => {
     const settings = calendarStorage.getSettings();
@@ -1652,7 +1689,7 @@ export function AgendaScreen(): React.JSX.Element {
    * available — the SDK exposes no folder-creation call of its own — so if it
    * cannot make a folder, ensureDirectory creates the chosen path anyway.
    */
-  const saveNoteFolder = async (kind: ConfigurableNoteKind, folder: string) => {
+  const saveNoteFolder = trackWorkspaceOperation(async (kind: ConfigurableNoteKind, folder: string) => {
     const trimmed = folder.trim().replace(/\/+$/, '');
     if (!trimmed.startsWith('/')) {
       setStatusMsg('Folder must be a full path, e.g. /storage/emulated/0/Note/Classes');
@@ -1663,7 +1700,7 @@ export function AgendaScreen(): React.JSX.Element {
     // name a new folder at all, since no folder picker exists.
     await meetingNoteService.ensureDirectory(trimmed);
     applyNoteFolder(kind, trimmed);
-  };
+  });
 
   /**
    * "Browse" for a folder by picking any file inside it and taking its parent.
@@ -1704,7 +1741,7 @@ export function AgendaScreen(): React.JSX.Element {
     setStatusMsg(`${kind[0].toUpperCase()}${kind.slice(1)} root: ${folder}`);
   };
 
-  const scanParaRoot = async (kind: ParaRootKind) => {
+  const scanParaRoot = trackWorkspaceOperation(async (kind: ParaRootKind) => {
     try {
       const folders = (await listParaFolderEntries(paraRootFor(kind))).filter(entry => entry.isFolder);
       setParaImportFolders(folders);
@@ -1712,6 +1749,54 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Could not read ${kind}: ${e?.message || 'folder unavailable'}`);
     }
+  });
+
+  /**
+   * PARA → + Existing Folder…: a folder already belonging to an item brings that
+   * item back (a completed or archived Project, an archived Area or Resource)
+   * instead of creating a duplicate; any other folder becomes a new item.
+   */
+  const handleAddExistingFolder = (kind: 'project' | 'area' | 'resource', folder: string) => {
+    const path = normaliseFolderPath(folder);
+    const name = path.split('/').pop() || path;
+    const sameFolder = (candidate?: string) => Boolean(candidate && normaliseFolderPath(candidate) === path);
+    const label = kind === 'project' ? 'Project' : kind === 'area' ? 'Area' : 'Resource';
+    let message: string;
+    if (kind === 'project') {
+      const existing = calendarStorage.getProjects().find(item => sameFolder(item.folder));
+      if (existing) {
+        calendarStorage.upsertProject({ ...existing, status: 'active', completedAt: undefined, archivedFromFolder: undefined });
+        message = existing.status === 'active'
+          ? `"${existing.name}" already uses this folder and is in Projects.`
+          : `Brought back Project "${existing.name}" from Archive. Its tasks and linked files are unchanged.`;
+      } else {
+        calendarStorage.upsertProject({ id: `proj-${Date.now()}`, name, folder: path, status: 'active', createdAt: new Date() });
+        message = `Added Project "${name}" using ${path}.`;
+      }
+      setProjects([...calendarStorage.getProjects()]);
+    } else if (kind === 'area') {
+      const existing = calendarStorage.getAreas().find(item => sameFolder(item.folder));
+      if (existing) {
+        calendarStorage.upsertArea({ ...existing, archived: undefined, archivedFromFolder: undefined });
+        message = existing.archived ? `Brought back Area "${existing.name}" from Archive.` : `"${existing.name}" already uses this folder and is in Areas.`;
+      } else {
+        calendarStorage.upsertArea({ id: `area-${Date.now()}`, name, folder: path, createdAt: new Date() });
+        message = `Added Area "${name}" using ${path}.`;
+      }
+      setAreas([...calendarStorage.getAreas()]);
+    } else {
+      const existing = calendarStorage.getResources().find(item => sameFolder(item.folder));
+      if (existing) {
+        calendarStorage.upsertResource({ ...existing, archived: undefined });
+        message = existing.archived ? `Brought back Resource "${existing.name}" from Archive.` : `"${existing.name}" already uses this folder and is in Resources.`;
+      } else {
+        calendarStorage.upsertResource({ id: `resource-${Date.now()}`, name, folder: path, createdAt: new Date() });
+        message = `Added Resource "${name}" using ${path}.`;
+      }
+      setResources([...calendarStorage.getResources()]);
+    }
+    setExistingFolderKind(null);
+    setStatusMsg(message || `Added ${label} "${name}".`);
   };
 
   const importParaFolder = (
@@ -1771,7 +1856,7 @@ export function AgendaScreen(): React.JSX.Element {
     setStatusMsg(`${kind === 'archive' ? 'Imported archived' : 'Associated'} ${entry.name} with ${entry.path}.`);
   };
 
-  const handleChooseCustomTemplate = async (kind: ConfigurableNoteKind) => {
+  const handleChooseCustomTemplate = trackWorkspaceOperation(async (kind: ConfigurableNoteKind) => {
     try {
       if (!RattaFileSelector || !RattaFileSelector.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -1792,9 +1877,9 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Template picker error: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
-  const handleChooseCustomTypeTemplate = async (type: EventType) => {
+  const handleChooseCustomTypeTemplate = trackWorkspaceOperation(async (type: EventType) => {
     try {
       if (!RattaFileSelector?.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -1815,7 +1900,7 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Template picker error: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
   /** Opens note-specific choices at the moment the file is actually created. */
   const handleRequestNoteCreation = (event: CalendarEvent) => {
@@ -1874,11 +1959,10 @@ export function AgendaScreen(): React.JSX.Element {
     setNoteCreationEvent(null);
     if (!event || kind === 'task') return;
     calendarStorage.setEventKind(noteIdentity(event), kind);
-    setNoteKindByEvent(prev => ({ ...prev, [noteIdentity(event)]: kind }));
     void handleExecuteNoteCreation(event, kind, folder, name);
   };
 
-  const handleExecuteNoteCreation = async (
+  const handleExecuteNoteCreation = trackWorkspaceOperation(async (
     event: CalendarEvent,
     kind: 'meeting' | 'class' = 'meeting',
     selectedFolder?: string,
@@ -1921,7 +2005,7 @@ export function AgendaScreen(): React.JSX.Element {
     } else {
       setStatusMsg(`Could not create note: ${result.error || 'Unknown error'}`);
     }
-  };
+  });
 
   const isWideScreen = Dimensions.get('window').width >= 800;
   const [isNomad, setIsNomad] = useState(false);
@@ -2041,23 +2125,6 @@ export function AgendaScreen(): React.JSX.Element {
     return () => { cancelled = true; };
   }, [selectedDate, dailyNoteFolder, dailyNoteFormat, weekStartsOn]);
 
-  // Mappings are the only record of which events have notes; unlike the daily
-  // check this costs nothing, since they are already in memory. Rebuilt when
-  // the notes directory or theme changes, both of which follow note creation.
-  useEffect(() => {
-    // Mappings only — a badge means a note exists on that day. An event that
-    // merely has a kind recorded has no note behind it, so badging it would
-    // make the flag say something it does not mean.
-    const mappings = calendarStorage.getAllMappings();
-    const byEvent: Record<string, NoteKind | undefined> = {};
-    for (const mapping of Object.values(mappings)) {
-      if (!mapping?.eventUid) continue;
-      const identity = mapping.seriesId || mapping.eventUid;
-      byEvent[identity] = mapping.kind;
-    }
-    setNoteKindByEvent(byEvent);
-  }, [events, targetNotesDir, eventNotePaths, refreshState]);
-
   // Same check as above, across the whole visible month so the grid can badge
   // the days that have one. There is no index to consult — listFiles is
   // unavailable — so this is one exists() per day, roughly thirty native calls
@@ -2139,7 +2206,7 @@ export function AgendaScreen(): React.JSX.Element {
     };
   }, [events, targetNotesDir, refreshState]);
 
-  const handleOpenDailyNoteForDate = async (targetDate: Date) => {
+  const handleOpenDailyNoteForDate = trackWorkspaceOperation(async (targetDate: Date) => {
     const settings = calendarStorage.getSettings();
     const folder = settings.dailyNoteFolder || '/storage/emulated/0/Note/Daily Notes';
     const format = settings.dailyNoteFormat || 'YYYY-MM-DD';
@@ -2176,11 +2243,11 @@ export function AgendaScreen(): React.JSX.Element {
     const opened = await openNoteInEditor(path);
     setStatusMsg(opened.success ? `Created and opened ${fileName}.note` : opened.message);
     if (opened.success) closePanel();
-  };
+  });
 
   const handleOpenDailyNote = () => handleOpenDailyNoteForDate(selectedDate);
 
-  const handleOpenWeeklyNote = async () => {
+  const handleOpenWeeklyNote = trackWorkspaceOperation(async () => {
     const settings = calendarStorage.getSettings();
     const folder = settings.dailyNoteFolder || '/storage/emulated/0/Note/Daily Notes';
     const path = weeklyReviewNotePath(folder, selectedDate, weekStartsOn);
@@ -2208,7 +2275,7 @@ export function AgendaScreen(): React.JSX.Element {
     const opened = await openNoteInEditor(path);
     setStatusMsg(opened.success ? `Created and opened ${fileName}` : opened.message);
     if (opened.success) closePanel();
-  };
+  });
 
   // Tasks are grouped by the day being viewed. Past Due and No Date only
   // surface on today — see sectionTasksForDay for why.
@@ -2229,7 +2296,7 @@ export function AgendaScreen(): React.JSX.Element {
    * separate task account is configured.
    * Completion is reflected with a ✓ in the title, matching the in-app check.
    */
-  const pushTaskAsEvent = async (task: CalendarTask) => {
+  const pushTaskAsEvent = trackWorkspaceOperation(async (task: CalendarTask) => {
     if (!calendarStorage.getSettings().pushTasksAsEvents) return;
     if (!caldavEnabled || !caldavAppleId || !caldavPassword) return;
     // An undated task has no day to occupy on a calendar.
@@ -2260,9 +2327,9 @@ export function AgendaScreen(): React.JSX.Element {
         taskListUrl: caldavTaskListUrl,
       }
     );
-  };
+  });
 
-  const pushTaskToCaldav = async (task: CalendarTask): Promise<string> => {
+  const pushTaskToCaldav = trackWorkspaceOperation(async (task: CalendarTask): Promise<string> => {
     const settings = calendarStorage.getSettings();
     if (task.caldavSyncExcluded) return '';
     if (!settings.taskCaldavEnabled || !settings.taskCaldavCollectionUrl ||
@@ -2291,14 +2358,14 @@ export function AgendaScreen(): React.JSX.Element {
       return '';
     }
     return res.message;
-  };
+  });
 
   /**
    * Tap always settles the common case in one press: anything not done becomes
    * done, and a done task reopens. Reaching In Progress by tapping would cost
    * two presses to finish a task, which is the action people take most.
    */
-  const handleToggleTask = async (task: CalendarTask) => {
+  const handleToggleTask = trackWorkspaceOperation(async (task: CalendarTask) => {
     const next = withStatus(task, isDone(task) ? 'todo' : 'done');
     calendarStorage.upsertTask(next);
     setTasks([...calendarStorage.getTasks()]);
@@ -2307,7 +2374,7 @@ export function AgendaScreen(): React.JSX.Element {
     setTasks([...calendarStorage.getTasks()]);
     await pushTaskAsEvent(next);
     if (taskSyncError) setStatusMsg(`Updated "${next.title}" locally. CalDAV: ${taskSyncError}`);
-  };
+  });
 
   /**
    * Opens a task in the creation modal. The modal still speaks CalendarEvent,
@@ -2347,7 +2414,7 @@ export function AgendaScreen(): React.JSX.Element {
     void handleDeleteTask(task);
   };
 
-  const handleDeleteTask = async (task: CalendarTask) => {
+  const handleDeleteTask = trackWorkspaceOperation(async (task: CalendarTask) => {
     const settings = calendarStorage.getSettings();
     let remoteError = '';
     const sourceCollection = taskSourceCollection(task);
@@ -2409,7 +2476,7 @@ export function AgendaScreen(): React.JSX.Element {
           ? `Deleted task "${task.title}" locally. Its source account is not configured, so the server was unchanged.`
         : `Deleted task "${task.title}".`) + keptNote
     );
-  };
+  });
 
   const eventIsEditable = (event: CalendarEvent): boolean => {
     const identity = noteIdentity(event);
@@ -2460,11 +2527,6 @@ export function AgendaScreen(): React.JSX.Element {
     calendarStorage.setMapping({ ...mapping, notePath: '' });
     calendarStorage.clearEventKind(identity);
 
-    setNoteKindByEvent(prev => {
-      const next = { ...prev };
-      delete next[identity];
-      return next;
-    });
     setEventNotePaths(prev => {
       const next = { ...prev };
       delete next[event.uid];
@@ -2473,7 +2535,7 @@ export function AgendaScreen(): React.JSX.Element {
     return path;
   };
 
-  const removeEventEverywhere = async (event: CalendarEvent): Promise<string> => {
+  const removeEventEverywhere = trackWorkspaceOperation(async (event: CalendarEvent): Promise<string> => {
     if (caldavEnabled && caldavAppleId && caldavPassword) {
       const removed = await caldavService.deleteIcloudEvent(
         event.uid,
@@ -2495,9 +2557,9 @@ export function AgendaScreen(): React.JSX.Element {
       calendarStorage.getCaldavEvents().filter(item => item.uid !== event.uid)
     );
     return '';
-  };
+  });
 
-  const handleConfirmDeleteWithNote = async (choice: 'event' | 'note') => {
+  const handleConfirmDeleteWithNote = trackWorkspaceOperation(async (choice: 'event' | 'note') => {
     const event = pendingDeleteEvent;
     setShowDeleteNoteModal(false);
     setPendingDeleteEvent(null);
@@ -2525,9 +2587,9 @@ export function AgendaScreen(): React.JSX.Element {
         ? `Note "${unlinked.split('/').pop()}" unlinked and kept. Create Note will ask Meeting or Class again.`
         : `No note is linked to "${event.summary}".`
     );
-  };
+  });
 
-  const handleCheckQueuedNoteDeletions = async () => {
+  const handleCheckQueuedNoteDeletions = trackWorkspaceOperation(async () => {
     const paths = [...calendarStorage.getPendingNoteDeletions()];
     const canRead = paths.length > 0 && (await ensureFileReadPermission());
     const entries: { path: string; exists: boolean }[] = [];
@@ -2540,9 +2602,9 @@ export function AgendaScreen(): React.JSX.Element {
       entries.push({ path, exists });
     }
     setQueuedNoteDeletions(entries);
-  };
+  });
 
-  const handleKeepQueuedNotes = async () => {
+  const handleKeepQueuedNotes = trackWorkspaceOperation(async () => {
     const error = await calendarStorage.clearPendingNoteDeletions();
     if (error) {
       setStatusMsg(`Could not clear the deletion queue: ${error}`);
@@ -2550,9 +2612,9 @@ export function AgendaScreen(): React.JSX.Element {
     }
     setQueuedNoteDeletions([]);
     setStatusMsg('Queued notes kept. SNFolio will not delete them.');
-  };
+  });
 
-  const handleDeleteItem = async (event: CalendarEvent) => {
+  const handleDeleteItem = trackWorkspaceOperation(async (event: CalendarEvent) => {
     const identity = noteIdentity(event);
     const editable = findStoredSeries(calendarStorage.getUserEvents(), identity) ||
       findStoredSeries(calendarStorage.getCaldavEvents(), identity);
@@ -2578,9 +2640,9 @@ export function AgendaScreen(): React.JSX.Element {
         ? `Could not delete "${event.summary}" from CalDAV: ${error}`
         : `Deleted event "${event.summary}".`);
     }
-  };
+  });
 
-  const handleDeleteSingleOccurrence = async () => {
+  const handleDeleteSingleOccurrence = trackWorkspaceOperation(async () => {
     if (!pendingDeleteEvent) return;
     const event = pendingDeleteEvent;
     const targetId = noteIdentity(event);
@@ -2635,9 +2697,9 @@ export function AgendaScreen(): React.JSX.Element {
     }
     setShowDeleteModal(false);
     setPendingDeleteEvent(null);
-  };
+  });
 
-  const handleDeleteEntireSeries = async () => {
+  const handleDeleteEntireSeries = trackWorkspaceOperation(async () => {
     if (!pendingDeleteEvent) return;
     const targetId = pendingDeleteEvent.recurringSeriesId || pendingDeleteEvent.uid;
     const storedRemote = findStoredSeries(calendarStorage.getCaldavEvents(), targetId);
@@ -2685,15 +2747,16 @@ export function AgendaScreen(): React.JSX.Element {
     setStatusMsg(`Deleted entire recurring series "${pendingDeleteEvent.summary}".`);
     setShowDeleteModal(false);
     setPendingDeleteEvent(null);
-  };
+  });
 
-  const handleCreateNewEvent = async (
+  const handleCreateNewEvent = trackWorkspaceOperation(async (
     newEvent: CalendarEvent,
     targetFeedId: string,
     typeId?: string,
     projectId?: string,
     areaId?: string,
-    linkedNotePath?: string
+    linkedNotePath?: string,
+    eventDesignation?: EventDesignation
   ) => {
     // Stored beside the event rather than on it: a sync rebuilds the event
     // object from ICS, and anything held on it would be lost.
@@ -2701,7 +2764,7 @@ export function AgendaScreen(): React.JSX.Element {
     if (linkedNotePath) saveNoteLink(identity, linkedNotePath);
     // A Project owns its Area. Without a Project, an explicit Area wins over
     // the Event Type's default; leaving it blank continues to follow the type.
-    calendarStorage.setMembership(identity, { typeId, projectId, areaId: projectId ? undefined : areaId });
+    calendarStorage.setMembership(identity, { typeId, projectId, eventDesignation, areaId: projectId ? undefined : areaId });
     setMembershipRevision(n => n + 1);
 
     // Same uid means this is an edit: replace in place rather than appending a
@@ -2783,9 +2846,9 @@ export function AgendaScreen(): React.JSX.Element {
         PluginManager.closePluginView();
       } catch (e) {}
     }
-  };
+  });
 
-  const handleCopyFeedEvent = async (event: CalendarEvent) => {
+  const handleCopyFeedEvent = trackWorkspaceOperation(async (event: CalendarEvent) => {
     setDetailEvent(null);
     const copy: CalendarEvent = {
       ...event,
@@ -2804,7 +2867,7 @@ export function AgendaScreen(): React.JSX.Element {
     };
     await handleCreateNewEvent(copy, 'primary-cal');
     setStatusMsg(`Created an editable copy of "${event.summary}". The Google event was unchanged.`);
-  };
+  });
 
   const handleHideFeedEvent = (event: CalendarEvent) => {
     const identity = feedEventHideIdentity(event);
@@ -2847,6 +2910,12 @@ export function AgendaScreen(): React.JSX.Element {
     if (!existing) return;
     calendarStorage.upsertProject({ ...existing, name, shortLabel });
     setProjects([...calendarStorage.getProjects()]);
+  };
+
+  /** Replaces the project screen's copy with the stored project after any change. */
+  const syncOpenProject = (projectId: string) => {
+    const stored = calendarStorage.getProjects().find(project => project.id === projectId);
+    setOpenProject(current => (current && current.id === projectId ? stored ?? null : current));
   };
 
   const handleSetProjectStatus = (projectId: string, status: ProjectStatus) => {
@@ -2966,7 +3035,7 @@ export function AgendaScreen(): React.JSX.Element {
     return moves;
   };
 
-  const finishArchiveChoice = async (moveFolders: boolean) => {
+  const finishArchiveChoice = trackWorkspaceOperation(async (moveFolders: boolean) => {
     const prompt = archiveFolderPrompt;
     if (!prompt || archiveMoveBusy) return;
     setArchiveMoveError('');
@@ -2990,7 +3059,11 @@ export function AgendaScreen(): React.JSX.Element {
     if (!moveFolders) {
       setArchiveFolderPrompt(null);
       setArchiveMoveBusy(false);
-      setStatusMsg(`${verb} ${prompt.kind} "${prompt.item.name}" without moving its folder.`);
+      const hadMove = prompt.mode === 'restore' && archiveMovesFor(prompt).length > 0;
+      const finished = prompt.mode === 'restore' && prompt.kind === 'project' && (prompt.item as Project).status === 'done';
+      setStatusMsg(prompt.mode === 'restore' && !hadMove
+        ? `${finished ? 'Reopened' : 'Restored'} ${prompt.kind} "${prompt.item.name}". Its folder is unchanged.`
+        : `${verb} ${prompt.kind} "${prompt.item.name}" without moving its folder.`);
       return;
     }
 
@@ -3063,7 +3136,7 @@ export function AgendaScreen(): React.JSX.Element {
     setArchiveFolderPrompt(null);
     setArchiveMoveBusy(false);
     setStatusMsg(`${verb} ${prompt.kind} "${prompt.item.name}" and moved ${completed.length === 1 ? 'its folder' : `${completed.length} folders`}.`);
-  };
+  });
 
   const handleArchiveProject = (project: Project) => {
     setArchiveDestinationRoot(null);
@@ -3292,26 +3365,26 @@ export function AgendaScreen(): React.JSX.Element {
     setTaskNoteCreationTarget(null); setShowItemCreationModal(false);
     setShowTaskList(false); setDetailEvent(null);
   };
-  const linkExistingNote = async (identity: string) => {
+  const linkExistingNote = trackWorkspaceOperation(async (identity: string) => {
     closeNoteDialogs();
     try {
       const path = await pickLinkedNote();
       if (path) { saveNoteLink(identity, path); setStatusMsg(`Linked ${path.split('/').pop()}.`); }
       else setStatusMsg('Note linking canceled.');
     } catch (error: any) { setStatusMsg(error?.message || 'Could not link note.'); }
-  };
+  });
   const unlinkExistingNote = (identity: string) => {
     calendarStorage.unlinkMapping(identity);
     setMembershipRevision(value => value + 1);
     closeNoteDialogs();
     setStatusMsg('Note unlinked. The note file is unchanged.');
   };
-  const handleLinkExistingTaskNote = async (selectedTask?: CalendarTask) => {
+  const handleLinkExistingTaskNote = trackWorkspaceOperation(async (selectedTask?: CalendarTask) => {
     const task = selectedTask || taskNoteCreationTarget;
     if (task) await linkExistingNote(task.uid);
-  };
+  });
 
-  const handleConfirmTaskNote = async (kind: LinkedNoteKind, folder: string, name: string) => {
+  const handleConfirmTaskNote = trackWorkspaceOperation(async (kind: LinkedNoteKind, folder: string, name: string) => {
     const task = taskNoteCreationTarget;
     setTaskNoteCreationTarget(null);
     if (!task || kind !== 'task') return;
@@ -3334,10 +3407,10 @@ export function AgendaScreen(): React.JSX.Element {
       ? `Created ${result.notePath.split('/').pop()}`
       : `Created ${result.notePath.split('/').pop()}, but could not open it: ${opened.message}`);
     if (opened.success) closePanel();
-  };
+  });
 
   /** Folder for a type's notes. Same browse-a-file-take-its-parent as elsewhere. */
-  const handleChooseTypeFolder = async (type: EventType) => {
+  const handleChooseTypeFolder = trackWorkspaceOperation(async (type: EventType) => {
     try {
       if (!RattaFileSelector?.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -3360,7 +3433,7 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Folder picker error: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
   /**
    * Notes written for this project's events and tasks.
@@ -3369,17 +3442,26 @@ export function AgendaScreen(): React.JSX.Element {
    * what records that a note was made for a given event, including notes filed
    * outside the Project's own folder.
    */
-  const linkedNotesForProject = (project: Project): Array<{ label: string; path: string }> => {
+  const linkedNotesForProject = (project: Project): LinkedFileEntry[] => {
     void membershipRevision;
     const seen = new Set<string>();
-    const out: Array<{ label: string; path: string }> = [];
+    const out: LinkedFileEntry[] = [];
+    const storedEvents = [...calendarStorage.getUserEvents(), ...calendarStorage.getCaldavEvents()];
 
     for (const mapping of Object.values(calendarStorage.getAllMappings())) {
-      if (!mapping?.notePath || seen.has(mapping.notePath)) continue;
+      if (!mapping?.notePath) continue;
       const identity = mapping.seriesId || mapping.eventUid;
+      // A mapping is stored under both its event and series keys; count each item once.
+      if (seen.has(`${identity}|${mapping.notePath}`)) continue;
       if (calendarStorage.getMembership(identity).projectId !== project.id) continue;
-      seen.add(mapping.notePath);
-      out.push({ label: mapping.notePath.split('/').pop() || 'Note', path: mapping.notePath });
+      seen.add(`${identity}|${mapping.notePath}`);
+      const task = tasks.find(item => item.uid === identity);
+      const event = storedEvents.find(item => item.uid === identity);
+      out.push({
+        label: mapping.notePath.split('/').pop() || 'Note',
+        path: mapping.notePath,
+        date: task ? task.dueDate : event?.start,
+      });
     }
     return out;
   };
@@ -3391,21 +3473,26 @@ export function AgendaScreen(): React.JSX.Element {
     return folderForParaItem(kind, item);
   };
 
+  // Saves onto the stored item, not the caller's copy: a stale copy would
+  // silently undo any change made since it was taken (as it once did a status).
   const persistParaFolder = (kind: ParaFolderKind, item: ParaFolderItem, folder: string) => {
     if (kind === 'project') {
-      calendarStorage.upsertProject({ ...(item as Project), folder });
+      const stored = calendarStorage.getProjects().find(project => project.id === item.id) ?? (item as Project);
+      calendarStorage.upsertProject({ ...stored, folder });
       setProjects([...calendarStorage.getProjects()]);
-      setOpenProject(current => current?.id === item.id ? { ...current, folder } : current);
+      syncOpenProject(item.id);
     } else if (kind === 'area') {
-      calendarStorage.upsertArea({ ...(item as Area), folder });
+      const stored = calendarStorage.getAreas().find(area => area.id === item.id) ?? (item as Area);
+      calendarStorage.upsertArea({ ...stored, folder });
       setAreas([...calendarStorage.getAreas()]);
     } else {
-      calendarStorage.upsertResource({ ...(item as Resource), folder, notePath: undefined });
+      const stored = calendarStorage.getResources().find(resource => resource.id === item.id) ?? (item as Resource);
+      calendarStorage.upsertResource({ ...stored, folder, notePath: undefined });
       setResources([...calendarStorage.getResources()]);
     }
   };
 
-  const handleNewParaNote = async (
+  const handleNewParaNote = trackWorkspaceOperation(async (
     kind: ParaFolderKind,
     item: ParaFolderItem,
     noteName: string,
@@ -3435,14 +3522,72 @@ export function AgendaScreen(): React.JSX.Element {
       setStatusMsg(`Could not create the note: ${result.error || 'unknown error'}`);
       return;
     }
-    persistParaFolder(kind, item, folder);
+    // Records the item's own folder if it had none. Never the folder being
+    // browsed: a note made in "Week 05" must not make Week 05 the project folder.
+    if (!item.folder) persistParaFolder(kind, item, paraFolder(kind, item));
     await prepareForNativeFileOpen();
     const opened = await openNoteInEditor(result.notePath);
     setStatusMsg(opened.success ? `Opened ${safeNoteName}.note` : opened.message);
     if (opened.success) closePanel();
+  });
+
+  /**
+   * Move… in Project Files and Linked Files: moves the file with its .mark and
+   * .sdr companions, then points every SNFolio link at the new path. Rejects
+   * with a message the caller shows beside the file.
+   */
+  const handleMoveParaFile = async (path: string, destinationFolder: string): Promise<void> => {
+    const name = path.split('/').pop() || path;
+    try {
+      const current = (await PluginCommAPI.getCurrentFilePath() as { result?: unknown } | null)?.result;
+      if (current === path) throw new Error(`${name} is the note open behind SNFolio. Open a different note, then move it.`);
+    } catch (e: any) {
+      if (e?.message?.includes('open behind SNFolio')) throw e;
+      // An unreadable current file must not block the move; the rename itself refuses a locked file.
+    }
+    const linked = Object.values(calendarStorage.getAllMappings()).some(mapping => mapping?.notePath === path);
+    const result = await moveFileToFolder(path, destinationFolder);
+    if (!result.success || !result.path) throw new Error(result.message);
+    const destination = result.path;
+    calendarStorage.rewritePathPrefix(path, destination);
+    setEventNotePaths(current => Object.fromEntries(
+      Object.entries(current).map(([key, value]) => [key, value === path ? destination : value])
+    ));
+    setMembershipRevision(value => value + 1);
+    setParaFilesRevision(value => value + 1);
+    setStatusMsg(`${result.message}${linked ? ' Its SNFolio links were updated.' : ''}`);
   };
 
-  const handleChooseParaFolder = async (
+  /** Class projects: Week 01 … Week NN from the class start to the due date; existing folders are kept. */
+  const handleCreateWeekFolders = trackWorkspaceOperation(async (projectId: string) => {
+    const project = calendarStorage.getProjects().find(item => item.id === projectId);
+    if (!project?.classStartDate || !project.dueDate) {
+      setStatusMsg('Set the class start date and a due date first.');
+      return;
+    }
+    const root = paraFolder('project', project).replace(/\/+$/, '');
+    const count = classWeekCount(project.classStartDate, project.dueDate, classWeekStartDay(project.classStartDate, project.classWeekStartsOn));
+    let created = 0;
+    let existing = 0;
+    // One at a time: concurrent native file calls have frozen the device before.
+    for (let week = 1; week <= count; week++) {
+      const path = `${root}/${weekFolderName(week)}`;
+      let present = false;
+      try { present = Boolean(await FileUtils.exists(path)); } catch (e) {}
+      if (present) { existing++; continue; }
+      if (await meetingNoteService.ensureDirectory(path)) created++;
+      else {
+        setStatusMsg(`Created ${created} week folder(s), but could not create ${weekFolderName(week)}. Check file access and try again.`);
+        setParaFilesRevision(value => value + 1);
+        return;
+      }
+    }
+    if (!project.folder) persistParaFolder('project', project, root);
+    setParaFilesRevision(value => value + 1);
+    setStatusMsg(`Week folders ready in ${project.name}: ${created} created${existing ? `, ${existing} already there` : ''}.`);
+  });
+
+  const handleChooseParaFolder = trackWorkspaceOperation(async (
     kind: ParaFolderKind,
     item: ParaFolderItem,
     folder: string
@@ -3458,9 +3603,9 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Folder picker error: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
-  const handleListParaEntries = async (
+  const handleListParaEntries = trackWorkspaceOperation(async (
     kind: ParaFolderKind,
     item: ParaFolderItem,
     folder: string
@@ -3468,9 +3613,9 @@ export function AgendaScreen(): React.JSX.Element {
     // Browsing only needs read access. Folder creation is handled when the
     // PARA item's folder is assigned or a note is created.
     return listParaFolderEntries(folder);
-  };
+  });
 
-  const handleBrowseParaFiles = async (kind: ParaFolderKind, item: ParaFolderItem) => {
+  const handleBrowseParaFiles = trackWorkspaceOperation(async (kind: ParaFolderKind, item: ParaFolderItem) => {
     try {
       if (!RattaFileSelector?.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -3497,14 +3642,14 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (e: any) {
       setStatusMsg(`Could not browse files: ${e?.message || 'Picker closed'}`);
     }
-  };
+  });
 
-  const handleOpenResourceFile = async (path: string) => {
+  const handleOpenResourceFile = trackWorkspaceOperation(async (path: string) => {
     await prepareForNativeFileOpen();
     const result = await openResourceFile(path);
     setStatusMsg(result.message);
     if (result.success) closePanel();
-  };
+  });
 
   const handleCreateEventType = (name: string): string => {
     const type: EventType = { id: `type-${Date.now()}`, name, createdAt: new Date() };
@@ -3640,7 +3785,7 @@ export function AgendaScreen(): React.JSX.Element {
    * then launch the destination. The caller closes SNFolio only after Android
    * has accepted that launch, so the previous note cannot flash in front.
    */
-  const prepareForNativeFileOpen = async () => {
+  const prepareForNativeFileOpen = trackWorkspaceOperation(async () => {
     try {
       await PluginCommAPI.cancelRecognize();
     } catch (e) {}
@@ -3649,19 +3794,19 @@ export function AgendaScreen(): React.JSX.Element {
       await PluginCommAPI.setLassoBoxState(2);
     } catch (e) {}
     await new Promise<void>(resolve => setTimeout(resolve, 180));
-  };
+  });
 
-  const handleOpenExistingNote = async (notePath: string) => {
+  const handleOpenExistingNote = trackWorkspaceOperation(async (notePath: string) => {
     setShowDateActionSheet(false);
     await prepareForNativeFileOpen();
-    const res = await openNoteInEditor(notePath);
+    const res = await openResourceFile(notePath);
     setStatusMsg(res.message);
     if (res.success) {
       closePanel();
     }
-  };
+  });
 
-  const handleFetchFeedUrl = async () => {
+  const handleFetchFeedUrl = trackWorkspaceOperation(async () => {
     const draftUrl = (newFeedInputRef.current?.getValue() ?? newFeedUrl).trim();
     if (!draftUrl) return;
     const feedUrl = normaliseFeedUrl(draftUrl);
@@ -3692,9 +3837,9 @@ export function AgendaScreen(): React.JSX.Element {
     } catch (err: any) {
       setStatusMsg(`Failed to fetch feed: ${err?.message || 'Network error'}`);
     }
-  };
+  });
 
-  const handleRemoveCalendarFeed = async (feed: CalendarFeed) => {
+  const handleRemoveCalendarFeed = trackWorkspaceOperation(async (feed: CalendarFeed) => {
     const updatedFeeds = calendarStorage.removeFeed(feed.id);
     setCalendarFeeds([...updatedFeeds]);
     setNewFeedUrl('');
@@ -3720,7 +3865,7 @@ export function AgendaScreen(): React.JSX.Element {
         ? `Removed ${feed.name} from this session, but could not save the change: ${persistenceError}`
         : `Removed ${feed.name}. Its source calendar was not changed.`
     );
-  };
+  });
 
 
   const handleToggleHideAllDay = (val: boolean) => {
@@ -3755,9 +3900,38 @@ export function AgendaScreen(): React.JSX.Element {
     });
   })();
 
+  if (storageLoadError) {
+    return <SafeAreaView style={styles.root}>
+      <Text allowFontScaling={false} style={styles.sectionTitle}>Saved workspace could not be loaded</Text>
+      <Text allowFontScaling={false} style={styles.bodyText}>{storageLoadError}</Text>
+      <Text allowFontScaling={false} style={styles.bodyText}>
+        Saving and synchronization are blocked to protect your existing data. Close and reopen SNFolio to retry. Do not uninstall or clear plugin data.
+      </Text>
+    </SafeAreaView>;
+  }
+
+  // A restore only mentions folders when one was really moved into Archive.
+  const restoreMovesFolder = archiveFolderPrompt?.mode === 'restore' && archiveMovesFor(archiveFolderPrompt).length > 0;
+  const restoreWithoutMove = archiveFolderPrompt?.mode === 'restore' && !restoreMovesFolder;
+  const reopeningFinished = archiveFolderPrompt?.mode === 'restore' && archiveFolderPrompt.kind === 'project' &&
+    (archiveFolderPrompt.item as Project).status === 'done';
+
   return (
+    <EventDesignationsContext.Provider value={Object.fromEntries([
+      ...allParsedEvents.map(event => [
+        noteIdentity(event), resolveEventDesignation(calendarStorage.getMembership(noteIdentity(event)), projects),
+      ]),
+      ...tasks.map(task => [task.uid, resolveTaskDesignation(calendarStorage.getMembership(task.uid), projects)]),
+    ])}>
+    <LinkedFilePathsContext.Provider value={Object.fromEntries(
+      Object.entries(calendarStorage.getAllMappings()).map(([identity, mapping]) => [identity, mapping.notePath])
+    )}>
     <TimeFormatContext.Provider value={timeFormat}>
     <SafeAreaView style={styles.root}>
+      {workspaceNotice ? <Text allowFontScaling={false} style={styles.bodyText}>{workspaceNotice}</Text> : null}
+      {calendarStorage.getSettings().restoreSyncPaused ? <Text allowFontScaling={false} style={styles.bodyText}>
+        Restored workspace: synchronization is paused. Review it in Help & Setup before reconnecting.
+      </Text> : null}
       {/* Top Header Bar */}
       <View style={styles.headerBar}>
         <View style={styles.titleWithSwitcher}>
@@ -3908,11 +4082,19 @@ export function AgendaScreen(): React.JSX.Element {
         <View style={styles.modalOverlay}>
           <View style={styles.archiveMoveModal}>
             <Text allowFontScaling={false} style={styles.actionSheetTitle}>
-              {archiveFolderPrompt?.mode === 'restore' ? 'Restore from Archive' : 'Archive Folder?'}
+              {archiveFolderPrompt?.mode === 'restore'
+                ? reopeningFinished ? 'Reopen Project' : 'Restore from Archive'
+                : 'Archive Folder?'}
             </Text>
             <Text allowFontScaling={false} style={styles.bodyTextCenter}>
               {archiveFolderPrompt?.item.name}
             </Text>
+            {restoreWithoutMove && archiveFolderPrompt && (
+              <Text allowFontScaling={false} style={styles.previewHint}>
+                {reopeningFinished ? 'It returns to the Projects list' : 'It returns to its list'}. Its folder was never moved and stays where it is:{'\n'}
+                {folderForParaItem(archiveFolderPrompt.kind, archiveFolderPrompt.item)}
+              </Text>
+            )}
             {archiveFolderPrompt && archiveMovesFor(archiveFolderPrompt).length > 0 && (
               <>
                 <Text allowFontScaling={false} style={styles.archivePathLabel}>From</Text>
@@ -3944,14 +4126,14 @@ export function AgendaScreen(): React.JSX.Element {
                 </Text>
               </TouchableOpacity>
             )}
-            <View style={styles.archiveWarning}>
+            {!restoreWithoutMove && <View style={styles.archiveWarning}>
               <Text allowFontScaling={false} style={styles.archiveWarningText}>
                 ⚠ Moving folders can break links inside Supernote notes, Recent files, shortcuts,
                 and links saved by other apps. SNFolio can update only paths it owns. Close files
                 in these folders before continuing. Supernote calls moving a folder “delete”
                 permission because the old path is removed; SNFolio does not delete its contents.
               </Text>
-            </View>
+            </View>}
             {archiveMoveError !== '' && (
               <View style={styles.archiveErrorBox}>
                 <Text allowFontScaling={false} style={styles.archiveErrorText}>{archiveMoveError}</Text>
@@ -3963,9 +4145,11 @@ export function AgendaScreen(): React.JSX.Element {
               onPress={() => void finishArchiveChoice(false)}
             >
               <Text allowFontScaling={false} style={styles.actionSheetBtnText}>
-                {archiveFolderPrompt?.mode === 'restore'
-                  ? 'Restore Only — Keep Folder Here'
-                  : 'Archive Only — Keep Folder Here'}
+                {restoreWithoutMove
+                  ? reopeningFinished ? 'Reopen' : 'Restore'
+                  : archiveFolderPrompt?.mode === 'restore'
+                    ? 'Restore Only — Keep Folder Here'
+                    : 'Archive Only — Keep Folder Here'}
               </Text>
             </TouchableOpacity>
             {archiveFolderPrompt && (
@@ -3996,6 +4180,16 @@ export function AgendaScreen(): React.JSX.Element {
           </View>
         </View>
       </Modal>
+
+      <FolderPickerModal
+        visible={existingFolderKind !== null}
+        title={`Choose a folder to add as a ${existingFolderKind === 'area' ? 'Area' : existingFolderKind === 'resource' ? 'Resource' : 'Project'}`}
+        initialPath={existingFolderKind
+          ? paraRootFor(existingFolderKind === 'area' ? 'areas' : existingFolderKind === 'resource' ? 'resources' : 'projects')
+          : '/storage/emulated/0'}
+        onCancel={() => setExistingFolderKind(null)}
+        onSelect={folder => { if (existingFolderKind) handleAddExistingFolder(existingFolderKind, folder); }}
+      />
 
       <FolderPickerModal
         visible={showArchiveRootPicker}
@@ -4152,7 +4346,7 @@ export function AgendaScreen(): React.JSX.Element {
           visible
           eventKey={noteIdentity(noteCreationEvent)}
           eventTitle={noteCreationEvent.summary}
-          initialKind={calendarStorage.getEventKind(noteIdentity(noteCreationEvent)) === 'class' ? 'class' : 'meeting'}
+          initialKind={resolveEventDesignation(calendarStorage.getMembership(noteIdentity(noteCreationEvent)), projects) === 'class' ? 'class' : 'meeting'}
           initialName={suggestedEventNoteName(
             noteCreationEvent,
             calendarStorage.getEventKind(noteIdentity(noteCreationEvent)) === 'class' ? 'class' : 'meeting'
@@ -4183,12 +4377,18 @@ export function AgendaScreen(): React.JSX.Element {
 
       <DatePickerModal
         visible={projectDueTarget !== null}
-        value={projectDueTarget?.dueDate || new Date()}
+        value={projectDueTarget?.[projectDateField] || new Date()}
         weekStartsOn={weekStartsOn}
         onSelect={date => {
           if (!projectDueTarget) return;
-          calendarStorage.upsertProject({ ...projectDueTarget, dueDate: date });
-          setProjects([...calendarStorage.getProjects()]);
+          // The stored project, not the copy captured when the picker opened: a
+          // stale copy once carried a status change along with the date.
+          const stored = calendarStorage.getProjects().find(project => project.id === projectDueTarget.id);
+          if (stored) {
+            calendarStorage.upsertProject({ ...stored, [projectDateField]: date });
+            setProjects([...calendarStorage.getProjects()]);
+            syncOpenProject(stored.id);
+          }
           setProjectDueTarget(null);
         }}
         onClose={() => setProjectDueTarget(null)}
@@ -5206,6 +5406,28 @@ export function AgendaScreen(): React.JSX.Element {
 
           {settingsTab === 'help' && (
             <>
+          <TouchableOpacity style={styles.actionSheetBtn}
+            disabled={isLoading || workspaceBusy || syncPhase === 'syncing' || archiveMoveBusy}
+            onPress={() => setShowWorkspaceBackup(true)}>
+            <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Workspace Backup & Restore…</Text>
+          </TouchableOpacity>
+          {calendarStorage.getSettings().restoreSyncPaused && <View>
+            <Text allowFontScaling={false} style={styles.bodyText}>
+              Restored synchronization is paused. Review restored tasks, events, and pending changes before reconnecting.
+              Reconnecting can upload old edits or apply {calendarStorage.getPendingTaskDeletes().length} queued task deletion(s) to your server.
+              Account passwords and private subscription URLs must be entered again.
+            </Text>
+            <TouchableOpacity style={styles.actionSheetBtn} onPress={async () => {
+              calendarStorage.updateSettings({ restoreSyncPaused: false });
+              const error = await calendarStorage.flush();
+              if (error) calendarStorage.updateSettings({ restoreSyncPaused: true });
+              setStatusMsg(error || 'Review acknowledged. Feeds and accounts remain paused; reconnect them in Calendar & Sync when ready.');
+              setRefreshState(value => value + 1);
+            }}>
+              <Text allowFontScaling={false} style={styles.actionSheetBtnText}>I Reviewed the Restored Changes — Allow Reconnection</Text>
+            </TouchableOpacity>
+          </View>}
+
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Notes Queued for Deletion</Text>
           <Text allowFontScaling={false} style={styles.bodyText}>
             SNFolio no longer deletes notes. Versions before 0.1.24 could queue a replaced note for
@@ -5493,6 +5715,7 @@ export function AgendaScreen(): React.JSX.Element {
               setPendingProjectId(undefined);
             }}
             onCreateEvent={handleCreateNewEvent}
+            eventDesignation={editingEvent ? calendarStorage.getMembership(noteIdentity(editingEvent)).eventDesignation : undefined}
             eventTypes={eventTypes}
             eventTypeId={
               editingEvent ? calendarStorage.getEventType(noteIdentity(editingEvent)) : undefined
@@ -5560,7 +5783,6 @@ export function AgendaScreen(): React.JSX.Element {
               currentDate={selectedDate}
               selectedDate={selectedDate}
               dailyNoteDates={dailyNoteDates}
-              noteKindByEvent={noteKindByEvent}
               allEvents={filterEvents(allParsedEvents, {
                 ...calendarStorage.getSettings(),
                 hideAllDayEvents: hideAllDay,
@@ -5606,7 +5828,7 @@ export function AgendaScreen(): React.JSX.Element {
                                 edge of the column and read as belonging to the
                                 next one. */}
                             <Text allowFontScaling={false} style={styles.gridStripText} numberOfLines={1}>
-                              {taskRowLabel(task, showDate)}
+                              <LinkedFileMarker item={task} />{taskRowLabel(task, showDate)}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -5657,18 +5879,46 @@ export function AgendaScreen(): React.JSX.Element {
               tasks={tasks}
               projectOf={projectOfTask}
               linkedNotes={linkedNotesForProject(openProject)}
+              weekStartsOn={weekStartsOn}
               onBack={() => setOpenProject(null)}
-              onSetDue={() => setProjectDueTarget(openProject)}
+              onSetDue={() => { setProjectDateField('dueDate'); setProjectDueTarget(openProject); }}
+              onSetClassStart={() => { setProjectDateField('classStartDate'); setProjectDueTarget(openProject); }}
+              onCreateWeekFolders={() => void handleCreateWeekFolders(openProject.id)}
+              onMoveFile={handleMoveParaFile}
+              onSetClassWeekStart={day => {
+                const stored = calendarStorage.getProjects().find(project => project.id === openProject.id);
+                if (!stored) return;
+                calendarStorage.upsertProject({ ...stored, classWeekStartsOn: day });
+                setProjects([...calendarStorage.getProjects()]);
+                syncOpenProject(stored.id);
+              }}
+              filesRevision={paraFilesRevision}
+              onSetLinkedFilesGrouping={grouping => {
+                const stored = calendarStorage.getProjects().find(project => project.id === openProject.id);
+                if (!stored) return;
+                calendarStorage.upsertProject({ ...stored, linkedFilesGrouping: grouping });
+                setProjects([...calendarStorage.getProjects()]);
+                syncOpenProject(stored.id);
+              }}
               onAssignArea={areaId => handleAssignProjectArea(openProject.id, areaId)}
               onCreateArea={handleCreateArea}
+              onUpdateClassification={(category, defaultEventDesignation) => {
+                const current = calendarStorage.getProjects().find(project => project.id === openProject.id);
+                if (!current) return;
+                const updated = { ...current, category, defaultEventDesignation };
+                calendarStorage.upsertProject(updated);
+                setProjects([...calendarStorage.getProjects()]);
+                setOpenProject(updated);
+              }}
               onRename={(name, shortLabel) => {
                 handleRenameProject(openProject.id, name, shortLabel);
-                setOpenProject({ ...openProject, name, shortLabel });
+                syncOpenProject(openProject.id);
               }}
               onToggleStatus={() => {
                 const next = openProject.status === 'active' ? 'done' : 'active';
                 handleSetProjectStatus(openProject.id, next);
-                setOpenProject({ ...openProject, status: next });
+                syncOpenProject(openProject.id);
+                if (next === 'done') setStatusMsg(`Marked "${openProject.name}" complete. It is in PARA → Archive → Projects; open it there and tap Reopen to bring it back.`);
               }}
               onArchive={() => handleArchiveProject(openProject)}
               onConvertToArea={() => handleConvertProjectToArea(openProject)}
@@ -5724,7 +5974,7 @@ export function AgendaScreen(): React.JSX.Element {
               onRestoreArea={handleRestoreArea}
               areaTaskCount={countTasksInArea}
               onOpenProject={setOpenProject}
-              onSetProjectDue={project => setProjectDueTarget(project)}
+              onSetProjectDue={project => { setProjectDateField('dueDate'); setProjectDueTarget(project); }}
               onArchiveProject={handleArchiveProject}
               onRestoreProject={handleRestoreProject}
               onBrowseFiles={(kind, item) => void handleBrowseParaFiles(kind, item)}
@@ -5754,6 +6004,8 @@ export function AgendaScreen(): React.JSX.Element {
                 setShowItemCreationModal(true);
               }}
               onMoveProject={handleMoveProject}
+              onAddExistingFolder={kind => setExistingFolderKind(kind)}
+              onMoveFile={handleMoveParaFile}
             />
           )}
 
@@ -5875,7 +6127,7 @@ export function AgendaScreen(): React.JSX.Element {
                         return (
                           <TouchableOpacity key={task.uid} style={styles.focusPriorityItem} onPress={() => handleEditTask(task)}>
                             <Text allowFontScaling={false} style={styles.focusPriorityNumber}>{index + 1}{contextTag ? ` · ${contextTag}` : ''}</Text>
-                            <Text allowFontScaling={false} style={styles.focusPriorityTitle} numberOfLines={2}>{task.title}</Text>
+                            <Text allowFontScaling={false} style={styles.focusPriorityTitle} numberOfLines={2}><LinkedFileMarker item={task} />{task.title}</Text>
                           </TouchableOpacity>
                         );
                       })}
@@ -5937,7 +6189,7 @@ export function AgendaScreen(): React.JSX.Element {
                                     style={[styles.focusTaskText, task.completed && styles.focusTaskDone]}
                                     numberOfLines={1}
                                   >
-                                    {taskRowLabel(task, showDate, contextTag)}
+                                    <LinkedFileMarker item={task} />{taskRowLabel(task, showDate, contextTag)}
                                   </Text>
                                 </TouchableOpacity>
 
@@ -6028,8 +6280,13 @@ export function AgendaScreen(): React.JSX.Element {
 
         </View>
       )}
+      {showWorkspaceBackup && <WorkspaceBackupPanel
+        disabled={isLoading || workspaceBusy || syncPhase === 'syncing' || archiveMoveBusy}
+        onRestored={onWorkspaceRestored} onClose={() => setShowWorkspaceBackup(false)} />}
     </SafeAreaView>
     </TimeFormatContext.Provider>
+    </LinkedFilePathsContext.Provider>
+    </EventDesignationsContext.Provider>
   );
 }
 

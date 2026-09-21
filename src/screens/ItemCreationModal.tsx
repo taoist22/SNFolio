@@ -1,3 +1,5 @@
+import { openLinkedFileLabel } from './LinkedFileMarker';
+import { designationLabel, EventDesignation, projectEventDesignation } from '../domain/eventDesignation';
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
 import { useTimeFormat } from './TimeFormatContext';
 import React, { useEffect, useRef, useState } from 'react';
@@ -85,7 +87,8 @@ interface ItemCreationModalProps {
     typeId?: string,
     projectId?: string,
     areaId?: string,
-    linkedNotePath?: string
+    linkedNotePath?: string,
+    eventDesignation?: EventDesignation
   ) => void;
   /** dueDate omitted means a genuinely undated task, not one dated today. */
   onCreateTask: (task: {
@@ -127,6 +130,7 @@ interface ItemCreationModalProps {
   /** Event types to tag this event with, and its current one. */
   eventTypes?: EventType[];
   eventTypeId?: string;
+  eventDesignation?: EventDesignation;
   eventProjectId?: string;
   eventAreaId?: string;
 }
@@ -157,6 +161,7 @@ export function ItemCreationModal({
   onCreateProject,
   eventTypes = [],
   eventTypeId,
+  eventDesignation,
   eventProjectId,
   eventAreaId,
 }: ItemCreationModalProps): React.JSX.Element {
@@ -223,6 +228,7 @@ export function ItemCreationModal({
   const [newProjectName, setNewProjectName] = useState<string>('');
   const newProjectInputRef = useRef<HandwritingTextInputHandle>(null);
   const [addingProject, setAddingProject] = useState<boolean>(false);
+  const [designationValue, setDesignationValue] = useState<EventDesignation | undefined>();
   const [typeValue, setTypeValue] = useState<string | undefined>(undefined);
   const [repeatSettings, setRepeatSettings] = useState<RepeatSettings>(() =>
     repeatSettingsFromRrule(undefined, targetDate)
@@ -263,6 +269,7 @@ export function ItemCreationModal({
       setNewAreaName('');
       setProjectValue(taskProjectId ?? eventProjectId);
       setTypeValue(eventTypeId);
+    setDesignationValue(eventDesignation);
       setRepeatSettings(repeatSettingsFromRrule(editingEvent.rrule, start));
       setRepeatRuleTouched(false);
       setShowRepeatUntilPicker(false);
@@ -280,6 +287,7 @@ export function ItemCreationModal({
     setNewAreaName('');
     setProjectValue(undefined);
     setTypeValue(eventTypeId);
+    setDesignationValue(eventDesignation);
     setRepeatSettings(repeatSettingsFromRrule(undefined, targetDate));
     setRepeatRuleTouched(false);
     setShowRepeatUntilPicker(false);
@@ -302,7 +310,7 @@ export function ItemCreationModal({
     } else {
       setIsAllDay(initialParsed ? initialParsed.allDay : type === 'task');
     }
-  }, [visible, initialTitle, initialParsed, type, editingEvent, targetDate, editingTask, taskAreaId, taskProjectId, eventTypeId, eventProjectId, eventAreaId]);
+  }, [visible, initialTitle, initialParsed, type, editingEvent, targetDate, editingTask, taskAreaId, taskProjectId, eventTypeId, eventDesignation, eventProjectId, eventAreaId]);
 
   const shiftDate = (days: number) => {
     setItemDate(prev => {
@@ -386,7 +394,8 @@ export function ItemCreationModal({
         typeValue,
         projectValue,
         derivedArea ? undefined : areaValue,
-        draftNote
+        draftNote,
+        designationValue
       );
     } else {
       onCreateTask({
@@ -1060,6 +1069,23 @@ export function ItemCreationModal({
               </>
             )}
 
+            {itemKind === 'event' && <>
+              <Text allowFontScaling={false} style={styles.label}>Calendar designation:</Text>
+              <View style={styles.chipRow}>
+                {(['auto', 'none', 'class', 'meeting'] as const).map(value => (
+                  <TouchableOpacity key={value}
+                    accessibilityRole="button" accessibilityState={{ selected: (designationValue || 'auto') === value }}
+                    style={[styles.stateChip, (designationValue || 'auto') === value && styles.stateChipSelected]}
+                    onPress={() => setDesignationValue(value === 'auto' ? undefined : value)}>
+                    <Text allowFontScaling={false} style={[styles.stateChipText, (designationValue || 'auto') === value && styles.stateChipTextSelected]}>
+                      {value === 'auto' ? `Project default: ${designationLabel(projectEventDesignation(projects.find(project => project.id === projectValue)))}` : designationLabel(value)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text allowFontScaling={false} style={styles.label}>C = Class · M = Meeting · [N] = linked note · [PDF] = linked PDF</Text>
+            </>}
+
             {itemKind === 'event' && eventTypes.length > 0 && (
               <>
                 {/* Settles where this event's notes go and what they look like,
@@ -1125,7 +1151,7 @@ export function ItemCreationModal({
               catch (error: any) { setNoteError(error?.message || 'Could not select note.'); }
               finally { setPickingNote(false); }
             }}>
-              <Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath || draftNote) ? 'Change Link…' : 'Link Note…'}</Text>
+              <Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath || draftNote) ? 'Change Link…' : 'Link Note / PDF…'}</Text>
             </TouchableOpacity>
             {(taskNotePath || eventNotePath || draftNote) && <TouchableOpacity style={styles.taskNoteBtn} onPress={() => {
               if (editingTask || editingEvent) onUnlinkNote?.();
@@ -1134,7 +1160,7 @@ export function ItemCreationModal({
             {(editingTask || editingEvent) && <TouchableOpacity style={styles.taskNoteBtn} onPress={() => {
               if (editingTask) onTaskNoteAction?.(editingTask, taskNotePath);
               else if (editingEvent) onEventNoteAction?.(editingEvent, eventNotePath);
-            }}><Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath) ? 'Open Note' : 'Create Note'}</Text></TouchableOpacity>}
+            }}><Text allowFontScaling={false} style={styles.taskNoteBtnText}>{(taskNotePath || eventNotePath) ? openLinkedFileLabel(taskNotePath || eventNotePath) : 'Create Note'}</Text></TouchableOpacity>}
           </View>
           {draftNote && <Text allowFontScaling={false} style={styles.label} numberOfLines={1}>Link on save: {draftNote.split('/').pop()}</Text>}
           <View style={styles.footerRow}>

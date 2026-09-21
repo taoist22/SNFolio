@@ -6,7 +6,7 @@ PARA is an organization model, not a required filing exercise. Create a category
 
 A Project is an outcome with a finish line: complete a course assignment, prepare a proposal, or plan a trip.
 
-Projects can contain tasks, related events, and a folder of notes or reference files. **Finish** records completion. **Archive** removes an inactive Project without claiming it was completed.
+Projects can contain tasks, related events, and a folder of notes or reference files. **Mark Complete** records completion and moves the Project to Archive, labeled Finished, without changing its tasks or folder. **Archive** removes an inactive Project without claiming it was completed. Both are under **Project Actions…** at the bottom of the Project; completed Projects can be reopened from Archive.
 
 ## Areas
 
@@ -33,6 +33,8 @@ Supernote exposes a file picker rather than a true folder picker. To link an exi
 3. Select any file inside that folder.
 4. Return to SNFolio and tap **Refresh Files** if necessary.
 
+To turn a folder that already exists into a Project, Area, or Resource, or to bring back a completed or archived item from its folder, use **+ Existing Folder…** at the top of PARA.
+
 For an empty or new folder, use the default SNFolio folder or type its full storage path where the screen provides a path field. SNFolio creates default folders for new PARA items.
 
 ## Creating and opening notes
@@ -45,4 +47,6 @@ Under **Connections & Settings → Notes**, **Default Event Note Location** choo
 
 Before opening another note, SNFolio clears transient recognition and lasso state to prevent handwriting from being carried into the destination file.
 
-For an existing task, choose **Link Note** to browse for a Supernote `.note` file. Linking preserves the notebook contents. The task then offers **Open Note**. Task note actions appear above the compact Save Task and Delete controls, and All Tasks also offers Link Note for tasks without a linked notebook.
+For a task or event, choose **Link Note / PDF** to browse for a Supernote `.note` file or a PDF. Linking never changes the file. The item then offers **Open Note** for a note, which opens in the note editor, or **Open PDF** for a PDF, which opens in the document reader. Task note actions appear above the compact Save Task and Delete controls, and All Tasks also offers Link Note / PDF for tasks without a linked file.
+
+Inside a Project, **Project Files** lists the Project's folder, and **Linked Files** lists the notes and PDFs linked to the Project's events and tasks, wherever they are stored. See the README for Project categories and the C/M calendar markers.

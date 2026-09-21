@@ -1,3 +1,4 @@
+import { LinkedFileMarker } from './LinkedFileMarker';
 import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
@@ -61,6 +62,10 @@ interface ParaViewProps {
   onEditEvent: (event: CalendarEvent) => void;
   onAddTaskToProject: (project: Project) => void;
   onMoveProject: (project: Project, direction: 'up' | 'down') => void;
+  /** Moves a file into another folder of the same item, updating SNFolio's links; rejects with a message. */
+  onMoveFile?: (path: string, destinationFolder: string) => Promise<void>;
+  /** Opens a folder browser so an existing folder becomes (or brings back) a Project, Area, or Resource. */
+  onAddExistingFolder: (kind: 'project' | 'area' | 'resource') => void;
 }
 
 /**
@@ -111,6 +116,8 @@ export function ParaView({
   onEditEvent,
   onAddTaskToProject,
   onMoveProject,
+  onAddExistingFolder,
+  onMoveFile,
 }: ParaViewProps): React.JSX.Element {
   const timeFormat = useTimeFormat();
   const lookup: ProjectLookup = {
@@ -185,6 +192,7 @@ export function ParaView({
     setConfirmingArchiveAreaId(null);
   };
   const [adding, setAdding] = React.useState<'project' | 'area' | 'resource' | null>(null);
+  const [choosingExistingKind, setChoosingExistingKind] = React.useState<boolean>(false);
   const [newName, setNewName] = React.useState<string>('');
   const [addingBusy, setAddingBusy] = React.useState<boolean>(false);
   const newItemInputRef = React.useRef<HandwritingTextInputHandle>(null);
@@ -232,6 +240,10 @@ export function ParaView({
           <TouchableOpacity style={styles.topBtn} onPress={() => setAdding('resource')}>
             <Text allowFontScaling={false} style={styles.topBtnText}>+ Resource</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.topBtn, choosingExistingKind && styles.topBtnActive]}
+            onPress={() => { setAdding(null); setChoosingExistingKind(value => !value); }}>
+            <Text allowFontScaling={false} style={styles.topBtnText}>+ Existing Folder…</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.topBtn, reorderProjects && styles.topBtnActive]}
             onPress={() => {
@@ -244,6 +256,20 @@ export function ParaView({
           </TouchableOpacity>
         </View>
       </View>
+
+      {choosingExistingKind && (
+        <View style={styles.addRow}>
+          <Text allowFontScaling={false} style={styles.topBtnText}>Add an existing folder as a:</Text>
+          {(['project', 'area', 'resource'] as const).map(kind => (
+            <TouchableOpacity key={kind} style={styles.topBtn} onPress={() => { setChoosingExistingKind(false); onAddExistingFolder(kind); }}>
+              <Text allowFontScaling={false} style={styles.topBtnText}>{kind === 'project' ? 'Project' : kind === 'area' ? 'Area' : 'Resource'}</Text>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity style={styles.topBtn} onPress={() => setChoosingExistingKind(false)}>
+            <Text allowFontScaling={false} style={styles.topBtnText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Named inline rather than in a sheet, as creating from a task form
           already does. */}
@@ -607,6 +633,7 @@ export function ParaView({
                       onOpenFile={onOpenFile}
                       onNewNote={(name, folder) => onNewNote('area', selectedArea, name, folder)}
                       onChooseFolder={folder => onChooseFolder('area', selectedArea, folder)}
+                      onMoveFile={onMoveFile}
                     />
                   )}
               </View>
@@ -642,7 +669,7 @@ export function ParaView({
                         numberOfLines={1}
                         style={[styles.taskText, isDone(task) && styles.taskTextDone]}
                       >
-                        {task.title}
+                        <LinkedFileMarker item={task} />{task.title}
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -664,7 +691,7 @@ export function ParaView({
                     </Text>
                     <View style={styles.taskBody}>
                       <Text allowFontScaling={false} numberOfLines={1} style={styles.taskText}>
-                        {event.summary}
+                        <LinkedFileMarker item={event} />{event.summary}
                       </Text>
                       <Text allowFontScaling={false} style={styles.projectItemMeta}>
                         {event.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -774,7 +801,7 @@ export function ParaView({
                                 <Text allowFontScaling={false} style={styles.taskGlyph}>{statusGlyph(taskStatus(task))}</Text>
                               </TouchableOpacity>
                               <TouchableOpacity style={styles.taskBody} onPress={() => onEditTask(task)}>
-                                <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}>{task.title}</Text>
+                                <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}><LinkedFileMarker item={task} />{task.title}</Text>
                                 {task.dueDate ? (
                                   <Text allowFontScaling={false} style={styles.projectItemMeta}>
                                     {task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -787,7 +814,7 @@ export function ParaView({
                             <TouchableOpacity key={`${event.uid}-${event.start.toISOString()}`} style={styles.projectItemRow} onPress={() => onEditEvent(event)}>
                               <Text allowFontScaling={false} style={styles.eventGlyph}>○</Text>
                               <View style={styles.taskBody}>
-                                <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}>{event.summary}</Text>
+                                <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}><LinkedFileMarker item={event} />{event.summary}</Text>
                                 <Text allowFontScaling={false} style={styles.projectItemMeta}>
                                   {event.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                                   {event.allDay ? ' · All day' : ` · ${formatDateTime(event.start, timeFormat)}`}
@@ -810,7 +837,7 @@ export function ParaView({
                                 <Text allowFontScaling={false} style={styles.taskGlyph}>{statusGlyph(taskStatus(task))}</Text>
                               </TouchableOpacity>
                               <TouchableOpacity style={styles.taskBody} onPress={() => onEditTask(task)}>
-                                <Text allowFontScaling={false} numberOfLines={1} style={[styles.projectItemText, styles.taskTextDone]}>{task.title}</Text>
+                                <Text allowFontScaling={false} numberOfLines={1} style={[styles.projectItemText, styles.taskTextDone]}><LinkedFileMarker item={task} />{task.title}</Text>
                               </TouchableOpacity>
                             </View>
                           ))}
@@ -829,6 +856,7 @@ export function ParaView({
                           onOpenFile={onOpenFile}
                           onNewNote={(name, folder) => onNewNote('project', project, name, folder)}
                           onChooseFolder={folder => onChooseFolder('project', project, folder)}
+                          onMoveFile={onMoveFile}
                         />
                       )}
                     </View>
@@ -946,6 +974,7 @@ export function ParaView({
                   onOpenFile={onOpenFile}
                   onNewNote={(name, folder) => onNewNote('resource', resource, name, folder)}
                   onChooseFolder={folder => onChooseFolder('resource', resource, folder)}
+                  onMoveFile={onMoveFile}
                 />
                   </>
                 )}
@@ -1053,7 +1082,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   topTitle: { fontSize: 15, fontWeight: 'bold', color: '#000000' },
-  topActions: { flexDirection: 'row' },
+  topActions: { flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, justifyContent: 'flex-end', rowGap: 6 },
   topBtn: {
     borderWidth: 2,
     borderColor: '#000000',
@@ -1126,7 +1155,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   rowBtnText: { fontSize: 11, fontWeight: 'bold', color: '#000000' },
-  addRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  addRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginBottom: 8, rowGap: 6 },
   addInput: {
     flex: 1,
     borderWidth: 2,

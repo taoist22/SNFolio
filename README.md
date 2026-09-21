@@ -33,7 +33,9 @@ SNFolio works without an online account. Calendar connections and PARA organizat
 - **Day Planner and Weekly Review**: Use the Day Planner for the selected day's schedule, journal, focus tasks, deliverables, project attention, and tomorrow's schedule. Weekly Review summarizes completed, remaining, overdue, and upcoming work and opens or creates a handwritten weekly note.
 - **CalDAV Two-Way Sync**: Synchronize calendar events and, through an optional independent VTODO-capable account, tasks including completion, priorities, undated items, remote deletions, and conflict-protected edits when the server supplies ETags.
 - **PARA Workspace**: Organize actionable Projects, ongoing Areas, reference Resources, and a unified Archive. Reorder Projects, assign them directly to Areas, review open and completed work in separate columns, and link Projects, Areas, and Resources to folders of Supernote notes and other files.
-- **Daily and PARA Notes**: Open or create daily journals and create, browse, and open notes and other files connected to Projects, Areas, and Resources. Create named notes for events and tasks, optionally filing them beneath their assigned Project or Area folder.
+- **Daily and PARA Notes**: Open or create daily journals and create, browse, and open notes and other files connected to Projects, Areas, and Resources. Create named notes for events and tasks, optionally filing them beneath their assigned Project or Area folder, or link an existing note or PDF.
+- **Class and Meeting Markers**: Mark Projects as Class or Work, and events as Class or Meeting. The calendar shows **C** and **M** beside items, and **[N]** or **[PDF]** when a note or PDF is linked.
+- **Workspace Backup & Restore**: Save tasks, calendars, PARA organization, settings, and note links to a backup file, and restore them later without touching your notes.
 - **Recurring Meetings**: Handle common RRULE schedules, cancellations, and moved occurrences, then append a fresh page using the configured template to the series notebook.
 - **Repeat Controls**: Create daily, weekly, monthly, or yearly series; choose intervals and weekly days; end on a date or after a count; edit a series; and delete one occurrence or the entire series.
 - **Auto-Launch**: Immediately open a newly created note or appended page on device so you can start handwriting right away.
@@ -136,7 +138,7 @@ For all three controls, the selected choice has a **black background with white 
 
 The **PARA** tab now represents all four categories:
 
-- **Projects** are actionable outcomes with due dates, progress, tasks, assigned events, linked meeting notes, and a folder of supporting files. Each Project card separates open and upcoming items from completed tasks. **Finish** records completion; **Archive** removes unfinished work from the active view without claiming it was completed.
+- **Projects** are actionable outcomes with due dates, progress, tasks, assigned events, linked meeting notes, and a folder of supporting files. Each Project card separates open and upcoming items from completed tasks. **Mark Complete** records that a Project is done; **Archive** removes unfinished work from the active view without claiming it was completed. Both are under **Project Actions…** at the bottom of the Project.
 - **Areas** are ongoing responsibilities that contain active projects and can carry their own folder of notes and reference files. Tasks and events can be assigned directly to an Area; an event assigned to a Project derives the Project's Area. Archiving an Area asks whether its active Projects should also be archived or should remain active and become unfiled.
 - **Resources** are non-actionable reference topics backed by folders. Link an existing folder by choosing any file inside it; SNFolio lists the same regular files the device exposes, including `.note`, PDF, EPUB, Office, text, and image files. SNFolio can also create additional `.note` files. New Resources default to `/Note/SNFolio/Resources/<Resource name>`.
 - **Archive** combines finished or archived Projects, retired Areas, and archived Resources. Projects and Areas are archived in SNFolio before any optional folder move, so a denied permission or failed move leaves the item archived and its folder untouched. Supernote describes moving as file-delete permission because the old path is removed; folder contents are not deleted. Each item can be restored; restoring a Project also restores its Area when necessary.
@@ -144,7 +146,59 @@ The **PARA** tab now represents all four categories:
 - The left pane follows PARA order—Projects, Areas, Resources, Archive—and each section expands into its items. Selecting an Area opens its projects; selecting a Resource lists the actual files in its folder on the right.
 - Choose **Reorder Projects** and use the arrow controls to save a preferred Project order in both panes.
 - Open a Project and tap its Area button to choose an Area directly, remove the assignment with **No Area**, or create and assign a new Area with **Add Area**.
-- Archiving an Area asks whether its active Projects should also be archived or should remain active and become unfiled.
+
+#### Inside a Project
+
+A Project shows files in two sections:
+
+- **📁 Project Files** lists what is actually in the Project's folder: notes, PDFs, EPUBs, and other documents, with each subfolder (such as `Week 01`) as a section you tap to open or close. Each open section lists its files and has its own **+ New Note in …**. **+ New Note** creates a note in this folder, **Choose Folder** points the Project at a different folder, and **Refresh Files** reads the folder again. A note created here is not linked to any event or task, so it does not appear on the calendar.
+- **🔗 Linked Files** lists the notes and PDFs linked to this Project's events and tasks, wherever they are stored. A meeting note kept in `/Note/Meetings` appears here once its event is filed under the Project.
+
+A note can appear in both sections, for example when you create an event's note in the Project's folder.
+
+**Project category** (in the Project's details) is **General**, **Class**, or **Work**:
+
+- A **Class** Project marks its events **Class (C)** by default, and its tasks show **C** too.
+- Other Projects leave events unmarked unless you set **Default calendar designation** to **Meeting**, which marks their events **M**. Tasks never show **M**.
+- Each event can follow the Project default or choose **None**, **Class**, or **Meeting** in its form, for example to keep a deadline in a Work Project unmarked. An event without a Project can also be marked as a Meeting.
+
+Tap **Project category … ▾ Change** to open these settings. Choices are saved as you tap them; tap **Close** (or the heading again) when you are done.
+
+For a **Class** Project, the same panel also has:
+
+- **Class start date.** Week 1 is the week containing it.
+- **Weeks run:** **From class start day** (the default: each week is seven days from the start date, so a class starting on a Wednesday has Wednesday–Tuesday weeks) or a chosen weekday such as **Mon** for Monday–Sunday weeks. The panel shows the resulting Week 1 dates and, with a due date, the last week. This applies only to the class's weeks; your calendar views keep their own week start.
+- **Group Linked Files by: None / Week.** This groups files linked to the Project's events and tasks; week folders hold everything else. With **Week**, Linked Files are listed under headings such as *Week 3 · Sep 13 – Sep 19*, using each linked event's date or task's due date. Weeks keep counting through breaks, and weeks with no linked files are not listed. A notebook linked from several weeks appears under each of them. Files linked from undated tasks appear under **No date**, and anything before the class starts under **Before Week 1**.
+- **Create Week Folders** makes `Week 01`, `Week 02`, … in the Project's folder, from the class start date to the due date (set the due date to when the class ends). Folders that already exist are kept. While the class is running, the current week's section is open and marked **this week**, and the top **+ New Note** files notes there. Put any number of notes and PDFs in each week's folder, and view them in the Supernote file manager too.
+- A course's modules can also be organised as subfolders in **Project Files**.
+- Creating a note while browsing a subfolder files it in that subfolder and leaves the Project's folder unchanged.
+
+The due date is a good place to record when a class ends.
+
+**Project Actions…** at the bottom of a Project holds the actions that change its status:
+
+- **Mark Complete** asks first and explains what happens: the Project leaves the Projects list and appears in **Archive → Projects**, labeled **Finished**. Its tasks, events, linked files, folder, due date, and settings stay exactly as they are; nothing is moved or deleted. Open it in Archive and tap **Reopen** to bring it back.
+- **Archive** sets a Project aside without marking it done, and can move its folder into your Archive folder.
+- **Move to Areas** turns the Project into an ongoing Area.
+- **Delete** removes the Project from SNFolio after you confirm. Its tasks and files are kept.
+
+#### Moving files into week folders or other subfolders
+
+Every file in **Project Files** and **Linked Files** has **Move…**. Choose the Project folder or one of its subfolders; for a linked file, the week of its linked event or task is listed first as **(suggested)**.
+
+- A PDF or EPUB moves together with its annotation (`.mark`) and reading (`.sdr`) files, so your handwriting on it is kept.
+- SNFolio updates its own links to the file, so **[N]** / **[PDF]**, **Open Note** / **Open PDF**, and Linked Files keep working. Links to it from inside other Supernote notes are not updated.
+- Nothing is overwritten: if the folder already has a file with that name, nothing is moved. If any part of the move fails, SNFolio puts the file back.
+- Close a file before moving it. SNFolio will not move the note that is open behind it.
+- Moving a linked file in Supernote's own file manager instead breaks SNFolio's link to it; use **Change Link…** on the event or task to fix it.
+
+#### Adding an existing folder
+
+Tap **+ Existing Folder…** at the top of PARA, choose **Project**, **Area**, or **Resource**, then browse to the folder (SD cards included) and tap **Use This Folder**. If the folder already belongs to a completed or archived item, that item is brought back with its tasks and linked files; otherwise a new item named after the folder is created.
+
+#### Restoring from Archive
+
+Opening an archived or completed item offers **Restore** (or **Reopen** for a completed Project). If SNFolio moved its folder into your Archive folder, you can move it back or leave it where it is. If the folder was never moved, SNFolio says so and shows where it is.
 
 ### 2. Navigate the Calendar and Planner
 
@@ -157,12 +211,24 @@ The **PARA** tab now represents all four categories:
 - Day Planner shows the selected day's schedule, journal, three focus tasks, grouped Tasks & Deliverables, Projects needing attention, and Tomorrow's Schedule.
 - Meetings display start/end times, locations, attendee lists, and agenda previews.
 
+Markers beside events and tasks, and in Month View day cells:
+
+| Marker | Meaning |
+|---|---|
+| **C** | Class: an event marked Class, or a task in a Class Project |
+| **M** | Meeting: an event marked Meeting |
+| **[N]** | A note is linked |
+| **[PDF]** | A PDF is linked |
+| **D** | Month View only: the day has a daily journal note |
+
+Class/Meeting and the attachment markers are independent, so a class with a linked PDF shows **C [PDF]**. Month View day cells also count items hidden behind the "more" count.
+
 On **Nomad**, Day Planner sections are collapsible and have fixed shortcuts for Schedule, Journal, Focus, Tasks, Projects, and Tomorrow. They start collapsed on first use and remember your expansion choices. Weekly Review keeps its note button and summary counts visible, with collapsible Projects, Deadlines, and Journals sections and separate saved expansion choices. PARA has fixed Projects, Areas, Resources, and Archive shortcuts. **Manta keeps its expanded planner layouts and existing PARA navigation.**
 
 ### 3. Link or Create a Note
 
-- When creating a task or event, choose **Link Note** to select an existing `.note` file. The link is saved only when you save the item; canceling discards the pending link.
-- Existing tasks and events offer **Create Note** and **Link Note** when unlinked. Linked items offer **Open Note**, **Change Link**, and **Unlink** in their editor or event details.
+- When creating a task or event, choose **Link Note / PDF** to select an existing `.note` file or PDF. The picker starts at the top of your storage. The link is saved only when you save the item; canceling discards the pending link.
+- Existing tasks and events offer **Create Note** and **Link Note / PDF** when unlinked. Linked items offer **Open Note** (or **Open PDF** for a linked PDF), **Change Link**, and **Unlink** in their editor or event details. A linked note opens in the note editor; a linked PDF opens in the document reader.
 - Linking, changing a link, or unlinking returns to the previous planner section. **Unlink** only removes the association; it does not delete the note file.
 - **SNFolio never deletes notes.** Deleting an event or task deletes only that item and unlinks its note, whether you linked the note or SNFolio created it. The note stays in its folder; delete it in Files if you no longer need it. Deleting an event or task that has a note first asks you to confirm, and says the note will be kept. For an event, the sheet also offers **Unlink the note, keep the event**, which makes Create Note ask Meeting or Class again.
 - Versions before 0.1.24 could queue a replaced note for deletion. **⚙ → Connections & Settings → Help & Setup → Check Queued Notes** shows anything still queued, and **Keep These Notes** clears the queue without touching the files.
@@ -174,6 +240,16 @@ To create a new note:
   1. Creates a new `.note` file in the confirmed folder using the resolved Event Type or Meeting/Class template.
   2. Links the note to the event.
   3. Opens the note so you can start handwriting immediately.
+
+### 4. Back Up and Restore Your Workspace
+
+Open **⚙ → Connections & Settings → Help & Setup → Workspace Backup & Restore…**.
+
+- **Create Backup** saves your tasks, calendars, PARA organization, settings, and note links to `Export/SNFolio Backups` and checks the saved file. Copy backups off the device to protect against loss; they contain your planning data in plain text.
+- Notes and other linked files are **not** in the backup. Back them up separately.
+- Passwords and private subscription addresses are **not** in the backup. Enter them again after restoring.
+- **Choose Backup to Restore…** shows the backup's date and item counts, and lists any linked notes that can no longer be found. **Create Safety Backup and Replace Workspace** first saves a verified backup of your current workspace, then replaces it. Notes are never changed.
+- After a restore, calendar feeds and account synchronization stay **paused** until you review the restored items and reconnect, so old edits or queued deletions are not sent to your server by surprise.
 
 ---
 
