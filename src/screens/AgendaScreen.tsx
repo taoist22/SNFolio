@@ -258,6 +258,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const [allParsedEvents, setAllParsedEvents] = useState<CalendarEvent[]>([]);
   const [calendarFeeds, setCalendarFeeds] = useState<CalendarFeed[]>([]);
   const [feedProjectPicker, setFeedProjectPicker] = useState<string | null>(null);
+  const [collapsedProjectCards, setCollapsedProjectCards] = useState<string[]>([]);
   const [bulkFileFeed, setBulkFileFeed] = useState<CalendarFeed | null>(null);
   /**
    * Whether an imported or subscribed feed is configured. Drives the Sync Now
@@ -431,6 +432,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setDailyNoteFolder(settings.dailyNoteFolder || '/storage/emulated/0/Note/Daily Notes');
     setDailyNoteFormat(settings.dailyNoteFormat || 'YYYY-MM-DD');
     setRouteEventNotesToPara(Boolean(settings.routeEventNotesToPara));
+    setCollapsedProjectCards(settings.collapsedProjectCards || []);
     setMeetingParaSubpath(settings.meetingParaSubpath ?? 'Meetings');
     setClassParaSubpath(settings.classParaSubpath ?? 'Classes');
     setCaldavCustomUrl(settings.caldavCustomUrl || '');
@@ -6281,6 +6283,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
           {viewMode === 'para' && !openProject && (
             <ParaView
               isNomad={isNomad}
+              weekStartsOn={weekStartsOn}
+              collapsedProjectIds={collapsedProjectCards}
+              onSetCollapsedProjects={ids => {
+                setCollapsedProjectCards(ids);
+                calendarStorage.updateSettings({ collapsedProjectCards: ids });
+              }}
               initialAreaId={paraFocusAreaId}
               onInitialAreaShown={() => setParaFocusAreaId(null)}
               areas={areas}

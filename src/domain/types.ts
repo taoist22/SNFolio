@@ -376,6 +376,8 @@ export interface CalendarSettings {
   taskNoteTemplate?: string;
   /** Whether Create Note initially selects its Project/Area rather than its standard folder. */
   routeEventNotesToPara?: boolean;
+  /** PARA project cards the user collapsed to one line. */
+  collapsedProjectCards?: string[];
   /** Save a workspace backup once a day when SNFolio opens (Mon … Sun files, each overwritten a week later). */
   autoBackupEnabled?: boolean;
   /** Local date (YYYY-MM-DD) of the last automatic backup. */

@@ -64,7 +64,7 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
   const numbers = ['scheduleStartHour', 'scheduleEndHour', 'weekStartsOn', 'calendarWeekLength'];
   for (const [key, value] of Object.entries(settings)) {
     if (key === 'feeds') continue;
-    if (key === 'hiddenFeedEventIds' || key === 'recentNotePaths') requireValid(strings(value), key);
+    if (key === 'hiddenFeedEventIds' || key === 'recentNotePaths' || key === 'collapsedProjectCards') requireValid(strings(value), key);
     else if (key === 'nomadWeeklySections' || key === 'nomadPlannerSections') {
       requireValid(object(value) && Object.values(value).every(item => typeof item === 'boolean'), key);
     } else if (booleans.includes(key)) requireValid(typeof value === 'boolean', key);

@@ -18,7 +18,7 @@ import {
   projectProgress,
   ProjectLookup,
 } from '../domain/taskListView';
-import { projectOverviewItems } from '../domain/projectOverview';
+import { projectOverviewItems, projectOverviewWindow, projectWindowSummary } from '../domain/projectOverview';
 
 interface ParaViewProps {
   isNomad?: boolean;
@@ -66,6 +66,11 @@ interface ParaViewProps {
   onMoveFile?: (path: string, destinationFolder: string) => Promise<void>;
   /** Opens a folder browser so an existing folder becomes (or brings back) a Project, Area, or Resource. */
   onAddExistingFolder: (kind: 'project' | 'area' | 'resource') => void;
+  /** First day of the week, for the two weeks a project card lists. */
+  weekStartsOn: number;
+  /** Project cards shown as one line; remembered between visits. */
+  collapsedProjectIds: string[];
+  onSetCollapsedProjects: (ids: string[]) => void;
 }
 
 /**
@@ -118,6 +123,9 @@ export function ParaView({
   onMoveProject,
   onAddExistingFolder,
   onMoveFile,
+  weekStartsOn,
+  collapsedProjectIds,
+  onSetCollapsedProjects,
 }: ParaViewProps): React.JSX.Element {
   const timeFormat = useTimeFormat();
   const lookup: ProjectLookup = {
@@ -253,6 +261,21 @@ export function ParaView({
             }}
           >
             <Text allowFontScaling={false} style={styles.topBtnText}>{reorderProjects ? 'Done Reordering' : 'Reorder Projects'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.topBtn}
+            onPress={() => {
+              const activeIds = projects.filter(project => project.status === 'active').map(project => project.id);
+              const allCollapsed = activeIds.length > 0 && activeIds.every(id => collapsedProjectIds.includes(id));
+              setSection('projects');
+              onSetCollapsedProjects(allCollapsed ? [] : activeIds);
+            }}
+          >
+            <Text allowFontScaling={false} style={styles.topBtnText}>
+              {projects.some(project => project.status === 'active') &&
+                projects.filter(project => project.status === 'active').every(project => collapsedProjectIds.includes(project.id))
+                ? 'Expand All' : 'Collapse All'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -723,6 +746,12 @@ export function ParaView({
                   );
                   const overdue = projectOverdue(project);
                   const projectArea = areas.find(candidate => candidate.id === project.areaId);
+                  // Overdue plus this and next calendar week; the full lists live in the project.
+                  const soon = projectOverviewWindow(openTasks, projectEvents, new Date(), weekStartsOn);
+                  const collapsed = collapsedProjectIds.includes(project.id);
+                  const toggleCollapsed = () => onSetCollapsedProjects(collapsed
+                    ? collapsedProjectIds.filter(id => id !== project.id)
+                    : [...collapsedProjectIds, project.id]);
 
                   return (
                     <View key={project.id} style={styles.projectCard}>
@@ -745,6 +774,11 @@ export function ParaView({
                             </TouchableOpacity>
                           </View>
                         )}
+                        <TouchableOpacity style={styles.collapseBtn} onPress={toggleCollapsed}
+                          accessibilityRole="button" accessibilityLabel={collapsed ? `Expand ${project.name}` : `Collapse ${project.name}`}
+                          accessibilityState={{ expanded: !collapsed }}>
+                          <Text allowFontScaling={false} style={styles.collapseGlyph}>{collapsed ? '▸' : '▾'}</Text>
+                        </TouchableOpacity>
                         <TouchableOpacity
                           style={styles.projectNameBtn}
                           onPress={() => onOpenProject(project)}
@@ -785,17 +819,19 @@ export function ParaView({
                       <View style={styles.projectMetaRow}>
                         <Text allowFontScaling={false} style={styles.projectMeta}>
                           {progressBar(progress.percent)} {progress.done}/{progress.total} tasks (
-                          {progress.percent}%)
+                          {progress.percent}%){collapsed ? ` · ${projectWindowSummary(soon)}` : ''}
                         </Text>
                       </View>
 
-                      <View style={useProjectColumns ? styles.projectWorkColumns : styles.projectWorkStack}>
+                      {!collapsed && <View style={useProjectColumns ? styles.projectWorkColumns : styles.projectWorkStack}>
                         <View style={[styles.projectWorkColumn, useProjectColumns && styles.projectWorkColumnOpen]}>
                           <Text allowFontScaling={false} style={styles.projectColumnHeading}>OPEN &amp; UPCOMING</Text>
                           {openTasks.length === 0 && projectEvents.length === 0 ? (
                             <Text allowFontScaling={false} style={styles.projectColumnEmpty}>Nothing open.</Text>
+                          ) : soon.overdue.length + soon.dueSoon.length + soon.eventsSoon.length === 0 ? (
+                            <Text allowFontScaling={false} style={styles.projectColumnEmpty}>Nothing in the next two weeks.</Text>
                           ) : null}
-                          {openTasks.map(task => (
+                          {[...soon.overdue, ...soon.dueSoon].map(task => (
                             <View key={task.uid} style={styles.projectItemRow}>
                               <TouchableOpacity onPress={() => onToggleTask(task)}>
                                 <Text allowFontScaling={false} style={styles.taskGlyph}>{statusGlyph(taskStatus(task))}</Text>
@@ -804,13 +840,13 @@ export function ParaView({
                                 <Text allowFontScaling={false} numberOfLines={1} style={styles.projectItemText}><LinkedFileMarker item={task} />{task.title}</Text>
                                 {task.dueDate ? (
                                   <Text allowFontScaling={false} style={styles.projectItemMeta}>
-                                    {task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    {`${soon.overdue.includes(task) ? '⚠ Overdue · ' : ''}${task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                                   </Text>
                                 ) : null}
                               </TouchableOpacity>
                             </View>
                           ))}
-                          {projectEvents.map(event => (
+                          {soon.eventsSoon.map(event => (
                             <TouchableOpacity key={`${event.uid}-${event.start.toISOString()}`} style={styles.projectItemRow} onPress={() => onEditEvent(event)}>
                               <Text allowFontScaling={false} style={styles.eventGlyph}>○</Text>
                               <View style={styles.taskBody}>
@@ -822,6 +858,16 @@ export function ParaView({
                               </View>
                             </TouchableOpacity>
                           ))}
+                          {soon.laterCount + soon.undatedCount > 0 && (
+                            <TouchableOpacity onPress={() => onOpenProject(project)}>
+                              <Text allowFontScaling={false} style={styles.viewCompletedText}>
+                                {`+ ${[
+                                  soon.laterCount ? `${soon.laterCount} later` : '',
+                                  soon.undatedCount ? `${soon.undatedCount} with no date` : '',
+                                ].filter(Boolean).join(' · ')} ›`}
+                              </Text>
+                            </TouchableOpacity>
+                          )}
                           <TouchableOpacity style={styles.addTaskRow} onPress={() => onAddTaskToProject(project)}>
                             <Text allowFontScaling={false} style={styles.addTaskText}>+ Add task…</Text>
                           </TouchableOpacity>
@@ -847,8 +893,8 @@ export function ParaView({
                             </TouchableOpacity>
                           ) : null}
                         </View>
-                      </View>
-                      {selectedProjectId === project.id && (
+                      </View>}
+                      {!collapsed && selectedProjectId === project.id && (
                         <ParaFilesPanel
                           itemKey={project.id}
                           folder={folderFor('project', project)}
@@ -1261,6 +1307,8 @@ const styles = StyleSheet.create({
   treeStem: { fontSize: 11, color: '#606060', marginRight: 4 },
   projectMeta: { fontSize: 12, color: '#303030', marginTop: 4 },
   projectMetaRow: { flexDirection: 'row', alignItems: 'center', paddingBottom: 5 },
+  collapseBtn: { minWidth: 40, minHeight: 40, alignItems: 'center', justifyContent: 'center', marginRight: 4 },
+  collapseGlyph: { fontSize: 20, fontWeight: 'bold', color: '#000000' },
   projectWorkColumns: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#000000' },
   projectWorkStack: { flexDirection: 'column', borderTopWidth: 1, borderTopColor: '#000000' },
   projectWorkColumn: { flex: 2, paddingHorizontal: 8, paddingVertical: 7 },
