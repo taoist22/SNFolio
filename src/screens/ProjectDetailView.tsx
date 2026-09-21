@@ -1,12 +1,12 @@
 import { designationLabel, EventDesignation, ProjectCategory, projectEventDesignation } from '../domain/eventDesignation';
 import { LinkedFileMarker } from './LinkedFileMarker';
-import { classWeekCount, classWeekNumber, classWeekRange, classWeekStartDay, currentWeekFolderName, groupLinkedFilesByWeek, LinkedFileEntry, weekFolderName } from '../domain/linkedFileWeeks';
+import { classWeekCount, classWeekNumber, classWeekRange, classWeekStartDay, currentWeekFolderName, isInsideFolder, linkCaption, LinkedFileEntry, pathKey, visibleWeekNumbers, weekFolderName } from '../domain/linkedFileWeeks';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const weekdayDate = (date: Date) => date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Area, CalendarTask, Project } from '../domain/types';
+import { Dimensions, LayoutChangeEvent, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Area, CalendarEvent, CalendarTask, Project } from '../domain/types';
 import { isDone, statusGlyph, taskStatus } from '../domain/taskModel';
 import { projectOverdue, projectProgress, ProjectLookup } from '../domain/taskListView';
 import { ParaFilesPanel } from './ParaFilesPanel';
@@ -15,6 +15,16 @@ import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingT
 import { deriveProjectShortLabel, normalizeProjectShortLabel } from '../domain/projectLabel';
 
 const DELIVERABLE_PREVIEW_LIMIT = 4;
+/** Width at which files and deliverables sit side by side; PARA's own columns use the same. */
+const TWO_COLUMN_WIDTH = 1000;
+const UPCOMING_LIMIT = 5;
+
+function upcomingWhen(event: CalendarEvent): string {
+  const day = event.start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  if (event.allDay) return day;
+  const time = event.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return `${day} · ${time}`;
+}
 
 interface DeliverableTaskRowProps {
   task: CalendarTask;
@@ -62,14 +72,20 @@ interface ProjectDetailViewProps {
   projectOf: (uid: string) => string | undefined;
   /** Notes and PDFs linked to this project's events and tasks, wherever they are stored, with each item's date. */
   linkedNotes: LinkedFileEntry[];
-  /** First day of the week (0 = Sunday), for grouping Linked Files by class week. */
+  /** First day of the week (0 = Sunday), used for a class without its own week start. */
   weekStartsOn: number;
   onSetClassStart: () => void;
-  onSetLinkedFilesGrouping: (grouping: 'none' | 'week') => void;
   /** Creates Week 01 … Week NN in the project folder, from the class start to the due date. */
   onCreateWeekFolders: () => void;
   /** Sets the weekday a class week begins; undefined means the class start date's weekday. */
   onSetClassWeekStart: (day?: number) => void;
+  /** One notebook per recurring series, or one note per session. */
+  onSetRecurringNotes: (mode: 'series' | 'session') => void;
+  /** Saves the comma-separated words that file calendar items under this project; blank turns it off. */
+  onSetAutoFileMatch: (words: string) => void;
+  /** This project's upcoming events, soonest first. */
+  upcomingEvents: CalendarEvent[];
+  onOpenEvent: (event: CalendarEvent) => void;
   /** Moves a file (and its annotation files) into another folder, updating SNFolio's links; rejects with a message. */
   onMoveFile: (path: string, destinationFolder: string) => Promise<void>;
   /** Changes when the project's files change outside the panel, so it reads them again. */
@@ -114,10 +130,13 @@ export function ProjectDetailView({
   linkedNotes,
   weekStartsOn,
   onSetClassStart,
-  onSetLinkedFilesGrouping,
   onCreateWeekFolders,
   onSetClassWeekStart,
   onMoveFile,
+  onSetRecurringNotes,
+  onSetAutoFileMatch,
+  upcomingEvents,
+  onOpenEvent,
   filesRevision = 0,
   onBack,
   onSetDue,
@@ -158,9 +177,14 @@ export function ProjectDetailView({
   const [confirmingConversion, setConfirmingConversion] = React.useState<boolean>(false);
   const [confirmingComplete, setConfirmingComplete] = React.useState<boolean>(false);
   const [actionsOpen, setActionsOpen] = React.useState<boolean>(false);
-  const isClass = project.category === 'class';
-  const groupByWeek = isClass && project.linkedFilesGrouping === 'week' && Boolean(project.classStartDate);
-  // Move… on a linked file: the project folder and its subfolders, with the linked item's week suggested.
+  const [autoFileDraft, setAutoFileDraft] = React.useState(project.autoFileMatch || '');
+  const autoFileInputRef = React.useRef<HandwritingTextInputHandle>(null);
+  React.useEffect(() => { setAutoFileDraft(project.autoFileMatch || ''); }, [project.id, project.autoFileMatch]);
+  // Start from the window width so the layout does not switch (and re-read the folder) on first layout.
+  const [width, setWidth] = React.useState(() => Dimensions.get('window').width);
+  const wide = width >= TWO_COLUMN_WIDTH;
+  const [elsewhereOpen, setElsewhereOpen] = React.useState(false);
+  // Move… on a file linked from outside the project folder: the project folder and its subfolders, with the linked item's week suggested.
   const [movingLinked, setMovingLinked] = React.useState<{ key: string; path: string } | null>(null);
   const [moveTargets, setMoveTargets] = React.useState<string[]>([]);
   const [moveBusy, setMoveBusy] = React.useState(false);
@@ -192,7 +216,7 @@ export function ProjectDetailView({
   };
   const suggestedFolder = (path: string): string | undefined => {
     if (!project.classStartDate) return undefined;
-    const dates = linkedNotes.filter(note => note.path === path && note.date).map(note => note.date as Date);
+    const dates = linkedNotes.filter(note => pathKey(note.path) === pathKey(path) && note.date).map(note => note.date as Date);
     if (!dates.length) return undefined;
     const week = classWeekNumber(dates[0], project.classStartDate, classWeekStartDay(project.classStartDate, project.classWeekStartsOn));
     return week >= 1 ? `${projectRoot}/${weekFolderName(week)}` : undefined;
@@ -201,13 +225,18 @@ export function ProjectDetailView({
     const key = `${keyPrefix}-${note.path}`;
     const parent = note.path.slice(0, note.path.lastIndexOf('/'));
     const suggested = suggestedFolder(note.path);
+    const caption = linkCaption(linkedNotes, note.path);
     return (
       <View key={key}>
         <View style={styles.linkedRow}>
           <TouchableOpacity style={styles.linkedOpen} onPress={() => onOpenNote(note.path)}>
             <Text allowFontScaling={false} style={styles.noteLabel} numberOfLines={1}>
-              📄 {note.label}
+              {`📄 ${note.label}  🔗`}
             </Text>
+            {Boolean(caption) && (
+              <Text allowFontScaling={false} style={styles.caption} numberOfLines={1}>{`↳ ${caption}`}</Text>
+            )}
+            <Text allowFontScaling={false} style={styles.caption} numberOfLines={1}>{parent}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.linkedMove} onPress={() => void startMove(key, note.path)}>
             <Text allowFontScaling={false} style={styles.headBtnText}>Move…</Text>
@@ -248,15 +277,21 @@ export function ProjectDetailView({
   const classWeekStart = project.classStartDate
     ? classWeekStartDay(project.classStartDate, project.classWeekStartsOn)
     : weekStartsOn;
-  const weekCount = isClass && project.classStartDate && project.dueDate
+  const weekCount = project.classStartDate && project.dueDate
     ? classWeekCount(project.classStartDate, project.dueDate, classWeekStart)
     : 0;
-  const currentWeekFolder = isClass && project.classStartDate && project.dueDate
+  const currentWeekFolder = project.classStartDate && project.dueDate
     ? currentWeekFolderName(new Date(), project.classStartDate, project.dueDate, classWeekStart)
     : undefined;
   const firstWeek = project.classStartDate ? classWeekRange(1, project.classStartDate, classWeekStart) : undefined;
   const lastWeek = project.classStartDate && weekCount > 0 ? classWeekRange(weekCount, project.classStartDate, classWeekStart) : undefined;
-  const flatLinkedFiles = linkedNotes.filter((note, index) => linkedNotes.findIndex(other => other.path === note.path) === index);
+  const weekWindow = project.classStartDate && weekCount > 0
+    ? visibleWeekNumbers(new Date(), project.classStartDate, weekCount, classWeekStart)
+    : undefined;
+  // Linked files already in the project folder show 🔗 in Project Files; the rest are listed separately.
+  const elsewhere = linkedNotes.filter((note, index) =>
+    !isInsideFolder(note.path, projectRoot)
+    && linkedNotes.findIndex(other => pathKey(other.path) === pathKey(note.path)) === index);
   const [areaPickerOpen, setAreaPickerOpen] = React.useState<boolean>(false);
   const [addingArea, setAddingArea] = React.useState<boolean>(false);
   const [newAreaName, setNewAreaName] = React.useState<string>('');
@@ -319,8 +354,222 @@ export function ProjectDetailView({
     );
   }
 
+  // Files on the left and work on the right when there is room; stacked, work first, when there is not.
+  const filesSection = (
+    <>
+      <Text allowFontScaling={false} style={styles.sectionHeading}>
+        📁 Project Files
+      </Text>
+      <ParaFilesPanel
+        itemKey={`${project.id}:${filesRevision}`}
+        currentSubfolder={currentWeekFolder ? `${projectRoot}/${currentWeekFolder}` : undefined}
+        weekWindow={weekWindow}
+        linkCaption={path => linkCaption(linkedNotes, path)}
+        onMoveFile={onMoveFile}
+        folder={folder}
+        onListEntries={onListEntries}
+        onOpenFile={onOpenFile}
+        onNewNote={onNewNote}
+        onChooseFolder={onChooseFolder}
+      />
+
+      {elsewhere.length > 0 && (
+        <>
+          <TouchableOpacity style={styles.elsewhereHeader} onPress={() => setElsewhereOpen(value => !value)}
+            accessibilityRole="button" accessibilityState={{ expanded: elsewhereOpen }}>
+            <Text allowFontScaling={false} style={styles.elsewhereTitle}>
+              {`${elsewhereOpen ? '▾' : '▸'} 🔗 Linked from elsewhere (${elsewhere.length})`}
+            </Text>
+          </TouchableOpacity>
+          {elsewhereOpen && (
+            <>
+              <Text allowFontScaling={false} style={styles.hint}>
+                Linked to this project's events and tasks, but stored outside its folder. Use Move… to bring one into this project.
+              </Text>
+              {linkedFileRows(elsewhere, 'elsewhere')}
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+  const workSection = (
+    <>
+      <View style={styles.upcoming}>
+        <Text allowFontScaling={false} style={styles.deliverableCardTitle}>
+          {`📅 Upcoming (${upcomingEvents.length})`}
+        </Text>
+        {upcomingEvents.length === 0 && (
+          <Text allowFontScaling={false} style={styles.hint}>
+            No events filed under this project in the next 60 days.
+          </Text>
+        )}
+        {upcomingEvents.slice(0, UPCOMING_LIMIT).map(event => (
+          <TouchableOpacity key={`${event.uid}-${event.start.getTime()}`} style={styles.upcomingRow} onPress={() => onOpenEvent(event)}>
+            <Text allowFontScaling={false} style={styles.upcomingWhen}>{upcomingWhen(event)}</Text>
+            <Text allowFontScaling={false} style={styles.taskText} numberOfLines={1}>{event.summary}</Text>
+          </TouchableOpacity>
+        ))}
+        {upcomingEvents.length > UPCOMING_LIMIT && (
+          <Text allowFontScaling={false} style={styles.hint}>{`+${upcomingEvents.length - UPCOMING_LIMIT} more in the calendar`}</Text>
+        )}
+      </View>
+      <View style={[styles.deliverableCards, wide && styles.deliverableCardsStacked]}>
+        <View style={[styles.deliverableCard, wide ? styles.deliverableCardStacked : styles.deliverableCardFirst]}>
+          <View style={styles.deliverableCardHeader}>
+            <Text allowFontScaling={false} style={styles.deliverableCardTitle} numberOfLines={1}>
+              ☑ Actionable Deliverables ({actionableDeliverables.length})
+            </Text>
+            <TouchableOpacity style={styles.addTaskBtn} onPress={onAddTask}>
+              <Text allowFontScaling={false} style={styles.addTask}>+ Add Task</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.deliverablePreview}>
+            {actionableDeliverables.length === 0 && (
+              <Text allowFontScaling={false} style={styles.hint}>Nothing to do yet.</Text>
+            )}
+            {actionableDeliverables.slice(0, DELIVERABLE_PREVIEW_LIMIT).map((task, index) => (
+              <DeliverableTaskRow
+                key={task.uid}
+                task={task}
+                index={index}
+                total={Math.min(actionableDeliverables.length, DELIVERABLE_PREVIEW_LIMIT)}
+                onToggle={onToggleTask}
+                onEdit={onEditTask}
+              />
+            ))}
+          </View>
+          {actionableDeliverables.length > 0 && (
+            <TouchableOpacity style={styles.openDeliverablesBtn} onPress={() => setDeliverablesView('actionable')}>
+              <Text allowFontScaling={false} style={styles.openDeliverablesText}>
+                Open all {actionableDeliverables.length} ›
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.deliverableCard}>
+          <View style={styles.deliverableCardHeader}>
+            <Text allowFontScaling={false} style={styles.deliverableCardTitle} numberOfLines={1}>
+              ✓ Completed Deliverables ({completedDeliverables.length})
+            </Text>
+          </View>
+          <View style={styles.deliverablePreview}>
+            {completedDeliverables.length === 0 && (
+              <Text allowFontScaling={false} style={styles.hint}>Nothing completed yet.</Text>
+            )}
+            {completedDeliverables.slice(0, DELIVERABLE_PREVIEW_LIMIT).map((task, index) => (
+              <DeliverableTaskRow
+                key={task.uid}
+                task={task}
+                index={index}
+                total={Math.min(completedDeliverables.length, DELIVERABLE_PREVIEW_LIMIT)}
+                onToggle={onToggleTask}
+                onEdit={onEditTask}
+              />
+            ))}
+          </View>
+          {completedDeliverables.length > 0 && (
+            <TouchableOpacity style={styles.openDeliverablesBtn} onPress={() => setDeliverablesView('completed')}>
+              <Text allowFontScaling={false} style={styles.openDeliverablesText}>
+                Open all {completedDeliverables.length} ›
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+      <View style={styles.actionsSection}>
+        <TouchableOpacity style={styles.dueBtn} onPress={() => {
+          setActionsOpen(value => !value);
+          setConfirmingComplete(false);
+          setConfirmingDelete(false);
+          setConfirmingConversion(false);
+        }}>
+          <Text allowFontScaling={false} style={styles.dueText}>⚙ Project Actions…   {actionsOpen ? '▴ Close' : '▾'}</Text>
+        </TouchableOpacity>
+        {actionsOpen && (
+          <View>
+            {project.status === 'active' ? (
+              <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingComplete(true)}>
+                <Text allowFontScaling={false} style={styles.headBtnText}>☑ Mark Complete</Text>
+                <Text allowFontScaling={false} style={styles.hint}>The project is done. Moves it to Archive, labeled Finished.</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity style={styles.actionRow} onPress={onToggleStatus}>
+                <Text allowFontScaling={false} style={styles.headBtnText}>Reopen</Text>
+                <Text allowFontScaling={false} style={styles.hint}>Returns the project to the Projects list.</Text>
+              </TouchableOpacity>
+            )}
+            {confirmingComplete && (
+              <View style={styles.confirmRow}>
+                <Text allowFontScaling={false} style={styles.confirmText}>
+                  Mark "{project.name}" complete?{'\n'}
+                  • It leaves the Projects list and appears in PARA → Archive → Projects, labeled Finished.{'\n'}
+                  • Its {mine.length} task{mine.length === 1 ? '' : 's'}, events, linked files, and folder stay exactly as they are. Nothing is moved or deleted.{'\n'}
+                  • Its due date, category, and settings are kept.{'\n'}
+                  • To bring it back, open it in Archive and tap Reopen.
+                </Text>
+                <View style={styles.metaActions}>
+                  <TouchableOpacity style={styles.headBtn} onPress={() => { setConfirmingComplete(false); onToggleStatus(); }}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Mark Complete</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingComplete(false)}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            <TouchableOpacity style={styles.actionRow} onPress={onArchive}>
+              <Text allowFontScaling={false} style={styles.headBtnText}>Archive</Text>
+              <Text allowFontScaling={false} style={styles.hint}>Set aside without marking it done. You can also move its folder into your Archive folder.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingConversion(true)}>
+              <Text allowFontScaling={false} style={styles.headBtnText}>Move to Areas</Text>
+              <Text allowFontScaling={false} style={styles.hint}>Turn it into an ongoing Area.</Text>
+            </TouchableOpacity>
+            {confirmingConversion && (
+              <View style={styles.confirmRow}>
+                <Text allowFontScaling={false} style={styles.confirmText}>
+                  Convert “{project.name}” to an ongoing Area? Its folder and filed items will be kept, but project due date and completion status will be removed.
+                </Text>
+                <View style={styles.metaActions}>
+                  <TouchableOpacity style={styles.headBtn} onPress={onConvertToArea}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Convert to Area</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingConversion(false)}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingDelete(true)}>
+              <Text allowFontScaling={false} style={styles.headBtnText}>Delete</Text>
+              <Text allowFontScaling={false} style={styles.hint}>Remove the project from SNFolio. Its tasks and files are kept.</Text>
+            </TouchableOpacity>
+            {confirmingDelete && (
+              <View style={styles.confirmRow}>
+                <Text allowFontScaling={false} style={styles.confirmText}>
+                  Delete "{project.name}"? Its {mine.length} task{mine.length === 1 ? '' : 's'} and any
+                  notebooks are kept — only the project goes.
+                </Text>
+                <View style={styles.metaActions}>
+                  <TouchableOpacity style={styles.headBtn} onPress={onDelete}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Delete</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingDelete(false)}>
+                    <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+    </>
+  );
+
   return (
-    <View style={styles.root}>
+    <View style={styles.root} onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}>
       <View style={styles.header}>
         <View style={styles.headerControls}>
         <TouchableOpacity style={styles.backBtn} onPress={onBack}>
@@ -439,7 +688,7 @@ export function ProjectDetailView({
       <View>
         <TouchableOpacity style={styles.dueBtn} onPress={() => setClassificationOpen(value => !value)}>
           <Text allowFontScaling={false} style={styles.dueText}>
-            Project category: {project.category === 'class' ? 'Class' : project.category === 'work' ? 'Work' : 'General'} · {designationLabel(projectEventDesignation(project))}   {classificationOpen ? '▴ Close' : '▾ Change'}
+            Project settings: {project.category === 'class' ? 'Class' : project.category === 'work' ? 'Work' : 'General'} · {designationLabel(projectEventDesignation(project))}   {classificationOpen ? '▴ Close' : '▾ Change'}
           </Text>
         </TouchableOpacity>
         {classificationOpen && <View>
@@ -472,77 +721,100 @@ export function ProjectDetailView({
           Events default to {designationLabel(projectEventDesignation(project))}. Each event can override this. Tasks show C when their project's events default to Class.
           {'\n'}[N] and [PDF] show linked files independently. Notes created directly in a Project need a link to a dated item to appear on the calendar.
         </Text>
-        {isClass && <>
-          <Text allowFontScaling={false} style={styles.areaOptionText}>Class start date</Text>
+        <Text allowFontScaling={false} style={styles.panelHeading}>Weeks</Text>
+        <Text allowFontScaling={false} style={styles.areaOptionText}>Start date</Text>
+        <View style={styles.classificationRow}>
+          <TouchableOpacity style={styles.headBtn} onPress={onSetClassStart}>
+            <Text allowFontScaling={false} style={styles.areaOptionText}>
+              {project.classStartDate
+                ? `📅 Starts ${project.classStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                : '📅 Set start date'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {project.classStartDate && <>
+          <Text allowFontScaling={false} style={styles.areaOptionText}>Weeks run</Text>
           <View style={styles.classificationRow}>
-            <TouchableOpacity style={styles.headBtn} onPress={onSetClassStart}>
+            <TouchableOpacity style={styles.headBtn}
+              accessibilityRole="button" accessibilityState={{ selected: project.classWeekStartsOn === undefined }}
+              onPress={() => onSetClassWeekStart(undefined)}>
               <Text allowFontScaling={false} style={styles.areaOptionText}>
-                {project.classStartDate
-                  ? `📅 Starts ${project.classStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
-                  : '📅 Set class start date'}
+                {project.classWeekStartsOn === undefined ? '● ' : '○ '}From start day ({DAY_NAMES[project.classStartDate.getDay()]})
               </Text>
             </TouchableOpacity>
-          </View>
-          {project.classStartDate && <>
-            <Text allowFontScaling={false} style={styles.areaOptionText}>Weeks run</Text>
-            <View style={styles.classificationRow}>
-              <TouchableOpacity style={styles.headBtn}
-                accessibilityRole="button" accessibilityState={{ selected: project.classWeekStartsOn === undefined }}
-                onPress={() => onSetClassWeekStart(undefined)}>
+            {[1, 2, 3, 4, 5, 6, 0].map(day => (
+              <TouchableOpacity key={day} style={styles.headBtn}
+                accessibilityRole="button" accessibilityState={{ selected: project.classWeekStartsOn === day }}
+                onPress={() => onSetClassWeekStart(day)}>
                 <Text allowFontScaling={false} style={styles.areaOptionText}>
-                  {project.classWeekStartsOn === undefined ? '● ' : '○ '}From class start day ({DAY_NAMES[project.classStartDate.getDay()]})
-                </Text>
-              </TouchableOpacity>
-              {[1, 2, 3, 4, 5, 6, 0].map(day => (
-                <TouchableOpacity key={day} style={styles.headBtn}
-                  accessibilityRole="button" accessibilityState={{ selected: project.classWeekStartsOn === day }}
-                  onPress={() => onSetClassWeekStart(day)}>
-                  <Text allowFontScaling={false} style={styles.areaOptionText}>
-                    {project.classWeekStartsOn === day ? '● ' : '○ '}{DAY_NAMES[day]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {firstWeek && (
-              <Text allowFontScaling={false} style={styles.dueText}>
-                Week 1: {weekdayDate(firstWeek.start)} – {weekdayDate(firstWeek.end)}
-                {lastWeek && weekCount > 1 ? ` · ${weekCount} weeks, ending Week ${weekCount}: ${weekdayDate(lastWeek.start)} – ${weekdayDate(lastWeek.end)}` : ''}
-              </Text>
-            )}
-          </>}
-          <Text allowFontScaling={false} style={styles.areaOptionText}>Group Linked Files by</Text>
-          <View style={styles.classificationRow}>
-            {(['none', 'week'] as const).map(value => (
-              <TouchableOpacity key={value} style={styles.headBtn}
-                accessibilityRole="button" accessibilityState={{ selected: (project.linkedFilesGrouping || 'none') === value }}
-                onPress={() => onSetLinkedFilesGrouping(value)}>
-                <Text allowFontScaling={false} style={styles.areaOptionText}>
-                  {(project.linkedFilesGrouping || 'none') === value ? '● ' : '○ '}{value === 'week' ? 'Week' : 'None'}
+                  {project.classWeekStartsOn === day ? '● ' : '○ '}{DAY_NAMES[day]}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-          <Text allowFontScaling={false} style={styles.dueText}>
-            Week 1 is the week containing the class start date. Weeks keep counting through breaks; weeks with no linked files are not listed. This does not change your calendar views.
-          </Text>
-          <Text allowFontScaling={false} style={styles.areaOptionText}>Week folders</Text>
-          {weekCount > 0 ? (
-            <>
-              <View style={styles.classificationRow}>
-                <TouchableOpacity style={styles.headBtn} onPress={onCreateWeekFolders}>
-                  <Text allowFontScaling={false} style={styles.areaOptionText}>📁 Create Week Folders</Text>
-                </TouchableOpacity>
-              </View>
-              <Text allowFontScaling={false} style={styles.dueText}>
-                Creates {weekFolderName(1)} – {weekFolderName(weekCount)} in this project's folder, from the class start date to the due date. Existing folders are kept. Each appears as a section in Project Files; while the class is running, this week's section is open and + New Note files notes there.
-              </Text>
-            </>
-          ) : (
+          {firstWeek && (
             <Text allowFontScaling={false} style={styles.dueText}>
-              Set the class start date and a due date (when the class ends) to create a folder for each week.
+              Week 1: {weekdayDate(firstWeek.start)} – {weekdayDate(firstWeek.end)}
+              {lastWeek && weekCount > 1 ? ` · ${weekCount} weeks, ending Week ${weekCount}: ${weekdayDate(lastWeek.start)} – ${weekdayDate(lastWeek.end)}` : ''}
             </Text>
           )}
         </>}
+        <Text allowFontScaling={false} style={styles.areaOptionText}>Week folders</Text>
+        {weekCount > 0 ? (
+          <>
+            <View style={styles.classificationRow}>
+              <TouchableOpacity style={styles.headBtn} onPress={onCreateWeekFolders}>
+                <Text allowFontScaling={false} style={styles.areaOptionText}>📁 Create Week Folders</Text>
+              </TouchableOpacity>
+            </View>
+            <Text allowFontScaling={false} style={styles.dueText}>
+              Creates {weekFolderName(1)} – {weekFolderName(weekCount)} in this project's folder, from the start date to the due date. Existing folders are kept. Last, this and next week are listed in Project Files; the rest are under All weeks. This week's section is open, and + New Note and Create Note on this project's events file notes in the week they belong to.
+            </Text>
+          </>
+        ) : (
+          <Text allowFontScaling={false} style={styles.dueText}>
+            Set a start date and a due date (when the class, engagement or project ends) to create a folder for each week.
+          </Text>
+        )}
+        <Text allowFontScaling={false} style={styles.areaOptionText}>Notes for recurring events</Text>
+        <View style={styles.classificationRow}>
+          {(['series', 'session'] as const).map(mode => (
+            <TouchableOpacity key={mode} style={styles.headBtn}
+              accessibilityRole="button" accessibilityState={{ selected: (project.recurringNotes || 'series') === mode }}
+              onPress={() => onSetRecurringNotes(mode)}>
+              <Text allowFontScaling={false} style={styles.areaOptionText}>
+                {(project.recurringNotes || 'series') === mode ? '● ' : '○ '}{mode === 'series' ? 'One notebook for the series' : 'One note per session'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text allowFontScaling={false} style={styles.dueText}>
+          {(project.recurringNotes || 'series') === 'series'
+            ? 'A weekly lecture or standing meeting keeps one notebook, with a new page for each session.'
+            : 'Each session gets its own dated note, filed in its week folder when this project has week folders. Notes already made keep their links.'}
+        </Text>
+        <Text allowFontScaling={false} style={styles.panelHeading}>Auto-file from calendars</Text>
+        <Text allowFontScaling={false} style={styles.dueText}>
+          Subscribed-calendar and CalDAV items whose title contains any of these words are filed under this project, unless you have already filed them elsewhere. Separate words with commas, e.g. IDS105, Acme.
+        </Text>
+        <View style={styles.addAreaRow}>
+          <HandwritingTextInput
+            ref={autoFileInputRef}
+            style={styles.addAreaInput}
+            value={autoFileDraft}
+            onChangeText={setAutoFileDraft}
+            placeholder="Words in the item title"
+            placeholderTextColor="#707070"
+            autoCorrect={false}
+          />
+          <TouchableOpacity style={styles.addAreaButton}
+            onPress={() => onSetAutoFileMatch((autoFileInputRef.current?.getValue() ?? autoFileDraft).trim())}>
+            <Text allowFontScaling={false} style={styles.areaOptionText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+        {Boolean(project.autoFileMatch) && (
+          <Text allowFontScaling={false} style={styles.hint}>{`Filing items containing: ${project.autoFileMatch}`}</Text>
+        )}
         <View style={styles.classificationRow}>
           <Text allowFontScaling={false} style={styles.hint}>Choices are saved as you tap them.</Text>
           <TouchableOpacity style={styles.headBtn} onPress={() => setClassificationOpen(false)}>
@@ -584,198 +856,21 @@ export function ProjectDetailView({
         </View>
       </View>
 
-      <ScrollView style={styles.body} keyboardShouldPersistTaps="always">
-        <Text allowFontScaling={false} style={styles.sectionHeading}>
-          📁 Project Files
-        </Text>
-        <ParaFilesPanel
-          itemKey={`${project.id}:${filesRevision}`}
-          currentSubfolder={currentWeekFolder ? `${projectRoot}/${currentWeekFolder}` : undefined}
-          onMoveFile={onMoveFile}
-          folder={folder}
-          onListEntries={onListEntries}
-          onOpenFile={onOpenFile}
-          onNewNote={onNewNote}
-          onChooseFolder={onChooseFolder}
-        />
-
-        <Text allowFontScaling={false} style={styles.sectionHeading}>
-          🔗 Linked Files
-        </Text>
-
-        {/* Files linked to this project's events and tasks; unlike Project Files, not a folder listing. */}
-        {groupByWeek
-          ? groupLinkedFilesByWeek(linkedNotes, project.classStartDate as Date, classWeekStart).map(group => (
-            <View key={group.key}>
-              <Text allowFontScaling={false} style={styles.weekHeading}>{group.title}</Text>
-              {linkedFileRows(group.files, group.key)}
-            </View>
-          ))
-          : linkedFileRows(flatLinkedFiles, 'all')}
-        {isClass && project.linkedFilesGrouping === 'week' && !project.classStartDate && linkedNotes.length > 0 && (
-          <Text allowFontScaling={false} style={styles.hint}>
-            Set a class start date under Project category to group these by week.
-          </Text>
-        )}
-
-        {linkedNotes.length === 0 && (
-          <Text allowFontScaling={false} style={styles.hint}>
-            Notes and PDFs linked to this project's events and tasks appear here, wherever they are stored.
-          </Text>
-        )}
-
-        <View style={styles.deliverableCards}>
-          <View style={[styles.deliverableCard, styles.deliverableCardFirst]}>
-            <View style={styles.deliverableCardHeader}>
-              <Text allowFontScaling={false} style={styles.deliverableCardTitle} numberOfLines={1}>
-                ☑ Actionable Deliverables ({actionableDeliverables.length})
-              </Text>
-              <TouchableOpacity style={styles.addTaskBtn} onPress={onAddTask}>
-                <Text allowFontScaling={false} style={styles.addTask}>+ Add Task</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.deliverablePreview}>
-              {actionableDeliverables.length === 0 && (
-                <Text allowFontScaling={false} style={styles.hint}>Nothing to do yet.</Text>
-              )}
-              {actionableDeliverables.slice(0, DELIVERABLE_PREVIEW_LIMIT).map((task, index) => (
-                <DeliverableTaskRow
-                  key={task.uid}
-                  task={task}
-                  index={index}
-                  total={Math.min(actionableDeliverables.length, DELIVERABLE_PREVIEW_LIMIT)}
-                  onToggle={onToggleTask}
-                  onEdit={onEditTask}
-                />
-              ))}
-            </View>
-            {actionableDeliverables.length > 0 && (
-              <TouchableOpacity style={styles.openDeliverablesBtn} onPress={() => setDeliverablesView('actionable')}>
-                <Text allowFontScaling={false} style={styles.openDeliverablesText}>
-                  Open all {actionableDeliverables.length} ›
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={styles.deliverableCard}>
-            <View style={styles.deliverableCardHeader}>
-              <Text allowFontScaling={false} style={styles.deliverableCardTitle} numberOfLines={1}>
-                ✓ Completed Deliverables ({completedDeliverables.length})
-              </Text>
-            </View>
-            <View style={styles.deliverablePreview}>
-              {completedDeliverables.length === 0 && (
-                <Text allowFontScaling={false} style={styles.hint}>Nothing completed yet.</Text>
-              )}
-              {completedDeliverables.slice(0, DELIVERABLE_PREVIEW_LIMIT).map((task, index) => (
-                <DeliverableTaskRow
-                  key={task.uid}
-                  task={task}
-                  index={index}
-                  total={Math.min(completedDeliverables.length, DELIVERABLE_PREVIEW_LIMIT)}
-                  onToggle={onToggleTask}
-                  onEdit={onEditTask}
-                />
-              ))}
-            </View>
-            {completedDeliverables.length > 0 && (
-              <TouchableOpacity style={styles.openDeliverablesBtn} onPress={() => setDeliverablesView('completed')}>
-                <Text allowFontScaling={false} style={styles.openDeliverablesText}>
-                  Open all {completedDeliverables.length} ›
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
+      {wide ? (
+        <View style={styles.columns}>
+          <ScrollView style={[styles.body, styles.leftColumn]} keyboardShouldPersistTaps="always">
+            {filesSection}
+          </ScrollView>
+          <ScrollView style={[styles.body, styles.rightColumn]} keyboardShouldPersistTaps="always">
+            {workSection}
+          </ScrollView>
         </View>
-        <View style={styles.actionsSection}>
-          <TouchableOpacity style={styles.dueBtn} onPress={() => {
-            setActionsOpen(value => !value);
-            setConfirmingComplete(false);
-            setConfirmingDelete(false);
-            setConfirmingConversion(false);
-          }}>
-            <Text allowFontScaling={false} style={styles.dueText}>⚙ Project Actions…   {actionsOpen ? '▴ Close' : '▾'}</Text>
-          </TouchableOpacity>
-          {actionsOpen && (
-            <View>
-              {project.status === 'active' ? (
-                <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingComplete(true)}>
-                  <Text allowFontScaling={false} style={styles.headBtnText}>☑ Mark Complete</Text>
-                  <Text allowFontScaling={false} style={styles.hint}>The project is done. Moves it to Archive, labeled Finished.</Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity style={styles.actionRow} onPress={onToggleStatus}>
-                  <Text allowFontScaling={false} style={styles.headBtnText}>Reopen</Text>
-                  <Text allowFontScaling={false} style={styles.hint}>Returns the project to the Projects list.</Text>
-                </TouchableOpacity>
-              )}
-              {confirmingComplete && (
-                <View style={styles.confirmRow}>
-                  <Text allowFontScaling={false} style={styles.confirmText}>
-                    Mark "{project.name}" complete?{'\n'}
-                    • It leaves the Projects list and appears in PARA → Archive → Projects, labeled Finished.{'\n'}
-                    • Its {mine.length} task{mine.length === 1 ? '' : 's'}, events, linked files, and folder stay exactly as they are. Nothing is moved or deleted.{'\n'}
-                    • Its due date, category, and settings are kept.{'\n'}
-                    • To bring it back, open it in Archive and tap Reopen.
-                  </Text>
-                  <View style={styles.metaActions}>
-                    <TouchableOpacity style={styles.headBtn} onPress={() => { setConfirmingComplete(false); onToggleStatus(); }}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Mark Complete</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingComplete(false)}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-              <TouchableOpacity style={styles.actionRow} onPress={onArchive}>
-                <Text allowFontScaling={false} style={styles.headBtnText}>Archive</Text>
-                <Text allowFontScaling={false} style={styles.hint}>Set aside without marking it done. You can also move its folder into your Archive folder.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingConversion(true)}>
-                <Text allowFontScaling={false} style={styles.headBtnText}>Move to Areas</Text>
-                <Text allowFontScaling={false} style={styles.hint}>Turn it into an ongoing Area.</Text>
-              </TouchableOpacity>
-              {confirmingConversion && (
-                <View style={styles.confirmRow}>
-                  <Text allowFontScaling={false} style={styles.confirmText}>
-                    Convert “{project.name}” to an ongoing Area? Its folder and filed items will be kept, but project due date and completion status will be removed.
-                  </Text>
-                  <View style={styles.metaActions}>
-                    <TouchableOpacity style={styles.headBtn} onPress={onConvertToArea}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Convert to Area</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingConversion(false)}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-              <TouchableOpacity style={styles.actionRow} onPress={() => setConfirmingDelete(true)}>
-                <Text allowFontScaling={false} style={styles.headBtnText}>Delete</Text>
-                <Text allowFontScaling={false} style={styles.hint}>Remove the project from SNFolio. Its tasks and files are kept.</Text>
-              </TouchableOpacity>
-              {confirmingDelete && (
-                <View style={styles.confirmRow}>
-                  <Text allowFontScaling={false} style={styles.confirmText}>
-                    Delete "{project.name}"? Its {mine.length} task{mine.length === 1 ? '' : 's'} and any
-                    notebooks are kept — only the project goes.
-                  </Text>
-                  <View style={styles.metaActions}>
-                    <TouchableOpacity style={styles.headBtn} onPress={onDelete}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Delete</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.headBtn} onPress={() => setConfirmingDelete(false)}>
-                      <Text allowFontScaling={false} style={styles.headBtnText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      </ScrollView>
+      ) : (
+        <ScrollView style={styles.body} keyboardShouldPersistTaps="always">
+          {workSection}
+          {filesSection}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -900,7 +995,18 @@ const styles = StyleSheet.create({
   linkedRow: { flexDirection: 'row', alignItems: 'center' },
   linkedOpen: { flex: 1 },
   linkedMove: { paddingVertical: 8, paddingHorizontal: 10 },
-  weekHeading: { fontSize: 14, fontWeight: 'bold', color: '#000000', marginTop: 8, marginBottom: 2, paddingHorizontal: 4 },
+  caption: { fontSize: 12, color: '#505050', marginTop: 1 },
+  panelHeading: { fontSize: 14, fontWeight: 'bold', color: '#000000', borderTopWidth: 1, borderTopColor: '#b0b0b0', paddingTop: 8, marginTop: 8 },
+  upcoming: { borderWidth: 2, borderColor: '#000000', borderRadius: 6, padding: 8, marginTop: 8, backgroundColor: '#ffffff' },
+  upcomingRow: { flexDirection: 'row', alignItems: 'center', minHeight: 40, borderTopWidth: 1, borderTopColor: '#d0d0d0' },
+  upcomingWhen: { width: 170, fontSize: 13, fontWeight: 'bold', color: '#000000' },
+  elsewhereHeader: { borderBottomWidth: 1, borderBottomColor: '#b0b0b0', paddingVertical: 8, paddingHorizontal: 4, marginTop: 8, marginBottom: 4 },
+  elsewhereTitle: { fontSize: 13, fontWeight: 'bold', color: '#000000' },
+  columns: { flex: 1, flexDirection: 'row' },
+  leftColumn: { marginRight: 8, paddingRight: 8, borderRightWidth: 1, borderRightColor: '#b0b0b0' },
+  rightColumn: { marginLeft: 8 },
+  deliverableCardsStacked: { flexDirection: 'column' },
+  deliverableCardStacked: { marginBottom: 10 },
   actionsSection: { marginTop: 12, marginBottom: 24 },
   actionRow: { borderTopWidth: 1, borderTopColor: '#d0d0d0', paddingVertical: 10, paddingHorizontal: 4 },
   deliverableCards: { flexDirection: 'row', marginTop: 8, marginBottom: 8 },

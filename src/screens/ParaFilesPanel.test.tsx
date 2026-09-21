@@ -132,3 +132,43 @@ test('a refused move is explained beside the file and nothing closes', async () 
   expect(allText(tree)).toContain('Move Syllabus.pdf to:');
   act(() => tree.unmount());
 });
+
+test('with a week window, only those weeks are listed; All weeks shows every week folder', async () => {
+  const weeks = Array.from({ length: 16 }, (_, i) => folderEntry(`Week ${String(i + 1).padStart(2, '0')}`));
+  const read = jest.fn(async (folder: string) => folder === '/A' ? [folderEntry('Handouts'), ...weeks] : []);
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => { tree = TestRenderer.create(<ParaFilesPanel {...props} onListEntries={read} weekWindow={[4, 5, 6]} currentSubfolder="/A/Week 05" />); });
+  await act(async () => {});
+  let text = allText(tree);
+  for (const name of ['Handouts', 'Week 04', 'Week 05', 'Week 06']) expect(text).toContain(`📁 ${name}`);
+  for (const name of ['Week 01', 'Week 03', 'Week 07', 'Week 16']) expect(text).not.toContain(`📁 ${name}`);
+  expect(text).toContain('▸ All weeks (16)');
+  await act(async () => { press(tree, 'All weeks (16)'); });
+  text = allText(tree);
+  expect(text).toContain('▾ All weeks (16)');
+  for (const name of ['Week 01', 'Week 07', 'Week 16']) expect(text).toContain(`📁 ${name}`);
+  // Each week is listed once, not in both places.
+  expect(text.split('📁 Week 05').length - 1).toBe(1);
+  act(() => tree.unmount());
+});
+
+test('without a week window, or when every week fits, there is no All weeks row', async () => {
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => { tree = TestRenderer.create(<ParaFilesPanel {...props} onListEntries={weekRead} />); });
+  expect(allText(tree)).not.toContain('All weeks');
+  await act(async () => { tree.update(<ParaFilesPanel {...props} onListEntries={weekRead} weekWindow={[1, 5]} />); });
+  expect(allText(tree)).not.toContain('All weeks');
+  act(() => tree.unmount());
+});
+
+test('linked files show 🔗 and what they are linked to; other files do not', async () => {
+  const read = jest.fn(async () => [entry('Lecture 5.note'), entry('Scratch.note')]);
+  const linkCaption = (path: string) => (path === '/A/Lecture 5.note' ? 'Research Methods (Sep 23)' : undefined);
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => { tree = TestRenderer.create(<ParaFilesPanel {...props} onListEntries={read} linkCaption={linkCaption} />); });
+  const text = allText(tree);
+  expect(text).toContain('Lecture 5.note  🔗');
+  expect(text).toContain('↳ Research Methods (Sep 23)');
+  expect(text).toContain('|Scratch.note|');
+  act(() => tree.unmount());
+});

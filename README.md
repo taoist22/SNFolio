@@ -30,13 +30,16 @@ SNFolio works without an online account. Calendar connections and PARA organizat
 
 - **iCal / `.ics` Feed Integration**: Subscribe to public or private iCal HTTPS URLs (Google Calendar, Outlook, Apple Calendar, Fastmail, Proton) or import `.ics` files.
 - **Month and Week Calendars**: Navigate high-contrast month and week views, choose a Sunday-through-Saturday week start, and display either five or seven days. Week View combines the calendar with Weekly Focus, due and unscheduled tasks, progress, and a Weekly Review note.
-- **Day Planner and Weekly Review**: Use the Day Planner for the selected day's schedule, journal, focus tasks, deliverables, project attention, and tomorrow's schedule. Weekly Review summarizes completed, remaining, overdue, and upcoming work and opens or creates a handwritten weekly note.
+- **Day Planner and Weekly Review**: Use the Day Planner for the selected day's schedule, journal, focus tasks, deliverables, project attention, and tomorrow's schedule. Weekly Review summarizes completed, remaining, overdue, and upcoming work, shows **This Week by Project** (each Project's tasks due, events, and linked notes for the week, with its week number), and opens or creates a handwritten weekly note.
 - **CalDAV Two-Way Sync**: Synchronize calendar events and, through an optional independent VTODO-capable account, tasks including completion, priorities, undated items, remote deletions, and conflict-protected edits when the server supplies ETags.
 - **PARA Workspace**: Organize actionable Projects, ongoing Areas, reference Resources, and a unified Archive. Reorder Projects, assign them directly to Areas, review open and completed work in separate columns, and link Projects, Areas, and Resources to folders of Supernote notes and other files.
 - **Daily and PARA Notes**: Open or create daily journals and create, browse, and open notes and other files connected to Projects, Areas, and Resources. Create named notes for events and tasks, optionally filing them beneath their assigned Project or Area folder, or link an existing note or PDF.
+- **Weekly Project Folders**: Give any Project (a course, a client engagement, a quarter of sprints) a start and due date, and SNFolio creates a folder per week, files each event or task note in the week it belongs to, and lists last, this and next week first. Files linked to the Project's tasks and events show **🔗** and what they are linked to.
+- **Auto-file from Calendars**: File Canvas, Outlook, Google and CalDAV items under a Project automatically by a word in their title, such as a course code or client name.
+- **Undo**: Undo Mark Complete, Archive, Move to Areas, Delete, and file moves from the message that confirms them.
 - **Class and Meeting Markers**: Mark Projects as Class or Work, and events as Class or Meeting. The calendar shows **C** and **M** beside items, and **[N]** or **[PDF]** when a note or PDF is linked.
-- **Workspace Backup & Restore**: Save tasks, calendars, PARA organization, settings, and note links to a backup file, and restore them later without touching your notes.
-- **Recurring Meetings**: Handle common RRULE schedules, cancellations, and moved occurrences, then append a fresh page using the configured template to the series notebook.
+- **Workspace Backup & Restore**: Save tasks, calendars, PARA organization, settings, and note links to a backup file, automatically once a day if you like, and restore them later without touching your notes.
+- **Recurring Meetings**: Handle common RRULE schedules, cancellations, and moved occurrences, then append a fresh page using the configured template to the series notebook, or give each session its own dated note, chosen per Project.
 - **Repeat Controls**: Create daily, weekly, monthly, or yearly series; choose intervals and weekly days; end on a date or after a count; edit a series; and delete one occurrence or the entire series.
 - **Auto-Launch**: Immediately open a newly created note or appended page on device so you can start handwriting right away.
 - **E-Ink-Friendly Controls**: Use tap-based date, time, duration, recurrence, and folder controls with larger touch targets. Choose a saved 12-hour or 24-hour clock format. Settings navigation stays visible while the section contents scroll, and clock/filter choices use clearly labeled black-and-white buttons. A startup status banner makes it clear when calendars and tasks are still loading.
@@ -147,14 +150,31 @@ The **PARA** tab now represents all four categories:
 - Choose **Reorder Projects** and use the arrow controls to save a preferred Project order in both panes.
 - Open a Project and tap its Area button to choose an Area directly, remove the assignment with **No Area**, or create and assign a new Area with **Add Area**.
 
+#### Setting up a class or client project
+
+The same steps work for a 16-week course or a 12-week client engagement:
+
+1. In **PARA**, tap **+ New Project** (or **+ Existing Folder…** to use a folder you already have) and open it.
+2. Tap **📅 Set a due date** and choose when the class or engagement ends.
+3. Tap **Project settings … ▾ Change**:
+   - Choose **Class** or **Work** as the Project category, so its events show **C** or **M**.
+   - Under **Weeks**, tap **📅 Set start date**, check the Week 1 dates shown, and pick another weekday under **Weeks run** if your weeks start differently.
+   - Tap **📁 Create Week Folders**.
+   - Under **Notes for recurring events**, keep **One notebook for the series**, or choose **One note per session** to get a dated note for each lecture or meeting in its week folder.
+   - Under **Auto-file from calendars**, enter the course code or client name as it appears in your calendar's item titles, and tap **Save**.
+   - Tap **Close**.
+4. From now on, **Create Note** on the Project's events, and on its tasks, offers the right week folder first. Anything else you write goes in with **+ New Note** in the week's section.
+5. Once a week, open **Planner ▾ → Weekly Review** and check **This Week by Project**.
+
 #### Inside a Project
 
-A Project shows files in two sections:
+On a wide screen (the Manta, or anything 1000 px or wider) a Project has two columns: **files on the left**, and **📅 Upcoming**, **Actionable Deliverables**, **Completed Deliverables** and **Project Actions…** on the right. Each column scrolls on its own. On a narrower screen they are stacked, work first.
 
-- **📁 Project Files** lists what is actually in the Project's folder: notes, PDFs, EPUBs, and other documents, with each subfolder (such as `Week 01`) as a section you tap to open or close. Each open section lists its files and has its own **+ New Note in …**. **+ New Note** creates a note in this folder, **Choose Folder** points the Project at a different folder, and **Refresh Files** reads the folder again. A note created here is not linked to any event or task, so it does not appear on the calendar.
-- **🔗 Linked Files** lists the notes and PDFs linked to this Project's events and tasks, wherever they are stored. A meeting note kept in `/Note/Meetings` appears here once its event is filed under the Project.
+- **📅 Upcoming** lists the Project's next five events in the coming 60 days (tap one to open it), with a count of any more.
 
-A note can appear in both sections, for example when you create an event's note in the Project's folder.
+- **📁 Project Files** lists what is actually in the Project's folder: notes, PDFs, EPUBs, and other documents, with each subfolder (such as `Week 01`) as a section you tap to open or close. Each open section lists its files and has its own **+ New Note in …**. **+ New Note** creates a note in this folder, **Choose Folder** points the Project at a different folder, and **Refresh Files** reads the folder again.
+- A file linked to one of the Project's events or tasks shows **🔗**, with a grey line underneath saying what it is linked to, for example *↳ Task: Read chapter 4* or *↳ Research Methods (Sep 23)*. A file linked to several items names the first and adds *+1 more*. A note created from Project Files is not linked to any event or task, so it has no 🔗 and does not appear on the calendar.
+- **🔗 Linked from elsewhere (N)**, below Project Files, lists linked files stored outside the Project's folder, for example a meeting note in `/Note/Meetings` or a PDF in `Document`. Tap it to open the list. It only appears while there are such files, and disappears once you have moved them all into the Project.
 
 **Project category** (in the Project's details) is **General**, **Class**, or **Work**:
 
@@ -162,18 +182,18 @@ A note can appear in both sections, for example when you create an event's note 
 - Other Projects leave events unmarked unless you set **Default calendar designation** to **Meeting**, which marks their events **M**. Tasks never show **M**.
 - Each event can follow the Project default or choose **None**, **Class**, or **Meeting** in its form, for example to keep a deadline in a Work Project unmarked. An event without a Project can also be marked as a Meeting.
 
-Tap **Project category … ▾ Change** to open these settings. Choices are saved as you tap them; tap **Close** (or the heading again) when you are done.
+Tap **Project settings … ▾ Change** to open these settings. Choices are saved as you tap them; tap **Close** (or the heading again) when you are done.
 
-For a **Class** Project, the same panel also has:
+**Weeks** work for every Project, whether a 16-week course, a 12-week client engagement, or a quarter of sprints:
 
-- **Class start date.** Week 1 is the week containing it.
-- **Weeks run:** **From class start day** (the default: each week is seven days from the start date, so a class starting on a Wednesday has Wednesday–Tuesday weeks) or a chosen weekday such as **Mon** for Monday–Sunday weeks. The panel shows the resulting Week 1 dates and, with a due date, the last week. This applies only to the class's weeks; your calendar views keep their own week start.
-- **Group Linked Files by: None / Week.** This groups files linked to the Project's events and tasks; week folders hold everything else. With **Week**, Linked Files are listed under headings such as *Week 3 · Sep 13 – Sep 19*, using each linked event's date or task's due date. Weeks keep counting through breaks, and weeks with no linked files are not listed. A notebook linked from several weeks appears under each of them. Files linked from undated tasks appear under **No date**, and anything before the class starts under **Before Week 1**.
-- **Create Week Folders** makes `Week 01`, `Week 02`, … in the Project's folder, from the class start date to the due date (set the due date to when the class ends). Folders that already exist are kept. While the class is running, the current week's section is open and marked **this week**, and the top **+ New Note** files notes there. Put any number of notes and PDFs in each week's folder, and view them in the Supernote file manager too.
-- A course's modules can also be organised as subfolders in **Project Files**.
+- **Start date.** Week 1 is the week containing it. Set the **due date** to when the class, engagement or project ends.
+- **Weeks run:** **From start day** (the default: each week is seven days from the start date, so a Project starting on a Wednesday has Wednesday–Tuesday weeks) or a chosen weekday such as **Mon** for Monday–Sunday weeks. The panel shows the resulting Week 1 dates and, with a due date, the last week. This applies only to the Project's weeks; your calendar views keep their own week start.
+- **Create Week Folders** makes `Week 01`, `Week 02`, … in the Project's folder, from the start date to the due date. Folders that already exist are kept. While the Project is running, the current week's section is open and marked **this week**, and the top **+ New Note** files notes there. To keep a long Project short, Project Files lists only last week, this week and next week; the rest are under **▸ All weeks (N)**. Before the Project starts it lists Weeks 1–2, and after it ends the final two. Other subfolders are always listed.
+- Once a Project has a start and due date, **Create Note** on one of its events, and on its tasks, suggests the week folder for the event's date or the task's due date, selected first, for example *Project: IDS105 · Week 05*. You can still pick another folder before the note is made.
+- **Notes for recurring events:** **One notebook for the series** (the default: a weekly lecture or standing meeting keeps one notebook, with a new page for each session, in the Project's folder) or **One note per session** (each session gets its own dated note, filed in its week folder when the Project has weeks). Notes already made keep their links when you switch.
 - Creating a note while browsing a subfolder files it in that subfolder and leaves the Project's folder unchanged.
 
-The due date is a good place to record when a class ends.
+**Auto-file from calendars:** enter words such as a course code (`IDS105`) or client name (`Acme`), separated by commas, and tap **Save**. Items from subscribed calendars (Canvas, Outlook, Google) and CalDAV whose title contains any of them are filed under this Project as they sync, so they get its **C**/**M** marker, appear in **Upcoming**, and their notes go to its folder. Items you have already filed elsewhere are left alone, and an item you unfile by hand is not filed again.
 
 **Project Actions…** at the bottom of a Project holds the actions that change its status:
 
@@ -182,12 +202,14 @@ The due date is a good place to record when a class ends.
 - **Move to Areas** turns the Project into an ongoing Area.
 - **Delete** removes the Project from SNFolio after you confirm. Its tasks and files are kept.
 
+After **Mark Complete**, **Archive**, **Move to Areas**, **Delete**, or moving a file, the message at the top has an **Undo** button. It puts the Project, its filing and its note links back as they were, and moves any folder or file back. Undo stays available while that message is showing, and only if nothing else in PARA has changed since.
+
 #### Moving files into week folders or other subfolders
 
-Every file in **Project Files** and **Linked Files** has **Move…**. Choose the Project folder or one of its subfolders; for a linked file, the week of its linked event or task is listed first as **(suggested)**.
+Every file in **Project Files** and **Linked from elsewhere** has **Move…**. Choose the Project folder or one of its subfolders, including weeks under All weeks; for a file linked from elsewhere, the week of its linked event or task is listed first as **(suggested)**.
 
 - A PDF or EPUB moves together with its annotation (`.mark`) and reading (`.sdr`) files, so your handwriting on it is kept.
-- SNFolio updates its own links to the file, so **[N]** / **[PDF]**, **Open Note** / **Open PDF**, and Linked Files keep working. Links to it from inside other Supernote notes are not updated.
+- SNFolio updates its own links to the file, so **[N]** / **[PDF]**, **Open Note** / **Open PDF**, and the 🔗 in Project Files keep working. Links to it from inside other Supernote notes are not updated.
 - Nothing is overwritten: if the folder already has a file with that name, nothing is moved. If any part of the move fails, SNFolio puts the file back.
 - Close a file before moving it. SNFolio will not move the note that is open behind it.
 - Moving a linked file in Supernote's own file manager instead breaks SNFolio's link to it; use **Change Link…** on the event or task to fix it.
@@ -223,7 +245,7 @@ Markers beside events and tasks, and in Month View day cells:
 
 Class/Meeting and the attachment markers are independent, so a class with a linked PDF shows **C [PDF]**. Month View day cells also count items hidden behind the "more" count.
 
-On **Nomad**, Day Planner sections are collapsible and have fixed shortcuts for Schedule, Journal, Focus, Tasks, Projects, and Tomorrow. They start collapsed on first use and remember your expansion choices. Weekly Review keeps its note button and summary counts visible, with collapsible Projects, Deadlines, and Journals sections and separate saved expansion choices. PARA has fixed Projects, Areas, Resources, and Archive shortcuts. **Manta keeps its expanded planner layouts and existing PARA navigation.**
+On **Nomad**, Day Planner sections are collapsible and have fixed shortcuts for Schedule, Journal, Focus, Tasks, Projects, and Tomorrow. They start collapsed on first use and remember your expansion choices. Weekly Review keeps its note button and summary counts visible, with collapsible This Week, Projects, Deadlines, and Journals sections and separate saved expansion choices. PARA has fixed Projects, Areas, Resources, and Archive shortcuts. **Manta keeps its expanded planner layouts and existing PARA navigation.**
 
 ### 3. Link or Create a Note
 
@@ -245,6 +267,7 @@ To create a new note:
 
 Open **⚙ → Connections & Settings → Help & Setup → Workspace Backup & Restore…**.
 
+- **Automatic daily backup** is on unless you switch it off here. Once a day, when SNFolio opens or syncs (before anything syncs), it saves `SNFolio Auto Backup - Mon` … `Sun` in `Export/SNFolio Backups`, each replacing last week's file for that day, so the last seven days are kept. Your own backups are never replaced. If an automatic backup fails, SNFolio says so and tries again next time.
 - **Create Backup** saves your tasks, calendars, PARA organization, settings, and note links to `Export/SNFolio Backups` and checks the saved file. Copy backups off the device to protect against loss; they contain your planning data in plain text.
 - Notes and other linked files are **not** in the backup. Back them up separately.
 - Passwords and private subscription addresses are **not** in the backup. Enter them again after restoring.

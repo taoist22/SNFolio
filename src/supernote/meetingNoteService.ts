@@ -1,3 +1,4 @@
+import { eventNoteMapping } from '../domain/eventNoteMapping';
 import { notePageCount } from '../domain/notePageCount';
 import { FileUtils, PluginCommAPI, PluginFileAPI } from 'sn-plugin-lib';
 import { CalendarEvent, CalendarSettings, CalendarTask, EventType, NoteKind } from '../domain/types';
@@ -197,7 +198,9 @@ export class MeetingNoteService {
     /** Folder confirmed by the user; omitted only by legacy/internal callers. */
     selectedFolder?: string,
     /** Editable title confirmed before the first file is created. */
-    noteName?: string
+    noteName?: string,
+    /** A recurring event's session gets its own note instead of a page in the series notebook. */
+    perSession = false
   ): Promise<MeetingNoteResult> {
     const settings = calendarStorage.getSettings();
     // The confirmation UI shows this same resolution. Event Type remains a
@@ -214,7 +217,7 @@ export class MeetingNoteService {
 
     const templateValue = destination.template;
 
-    const isRecurringSeries = Boolean(event.recurringSeriesId && !forceNewFile);
+    const isRecurringSeries = Boolean(event.recurringSeriesId && !forceNewFile && !perSession);
     const filename = noteName
       ? safeNoteFilename(noteName)
       : generateNoteFilename(event, isRecurringSeries, settings.seriesNotebookPrefix, kind);
@@ -223,7 +226,7 @@ export class MeetingNoteService {
     // series across multiple notebooks without warning.
     const existingMapping = forceNewFile
       ? undefined
-      : calendarStorage.getMapping(event.recurringSeriesId || event.uid);
+      : eventNoteMapping(key => calendarStorage.getMapping(key), event, perSession);
     const proposedDir = selectedFolder || destination.folder;
     const notePath = existingMapping?.notePath || `${proposedDir}/${filename}`;
     const noteSlash = notePath.lastIndexOf('/');
@@ -303,6 +306,7 @@ export class MeetingNoteService {
         notePath,
         lastPageNum: pageNum,
         lastCreatedIso: new Date().toISOString(),
+        ...(perSession && event.recurringSeriesId ? { perSession: true, eventStartIso: event.start.toISOString() } : {}),
       });
       const persistenceError = await calendarStorage.flush();
 

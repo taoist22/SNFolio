@@ -1,8 +1,9 @@
 import { EventDesignation, resolveEventDesignation, resolveTaskDesignation } from '../domain/eventDesignation';
-import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderName } from '../domain/linkedFileWeeks';
+import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderForDate, weekFolderName } from '../domain/linkedFileWeeks';
 import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
 import { useWorkspaceActivity } from './useWorkspaceActivity';
 import { WorkspaceBackupPanel } from './WorkspaceBackupPanel';
+import { autoBackupDue, createAutoBackup, localDayKey } from '../supernote/workspaceBackupService';
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
 import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import { SettingChoice } from './SettingChoice';
@@ -58,7 +59,7 @@ import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
 import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
 import { resolveArea, resolveAreaId } from '../domain/membership';
-import { calendarStorage } from '../storage/calendarStorage';
+import { calendarStorage, RecordSnapshot } from '../storage/calendarStorage';
 import { generateNoteFilename, noteIdentity } from '../domain/meetingSnapshot';
 import {
   caldavService,
@@ -93,10 +94,12 @@ import { ParaView } from './ParaView';
 import { ProjectDetailView } from './ProjectDetailView';
 import { moveActiveProject, projectProgress } from '../domain/taskListView';
 import { fetchCalendarFeed, normaliseFeedUrl, refreshCalendarFeeds } from '../domain/feedService';
+import { autoFileProject, autoFileWords } from '../domain/autoFile';
+import { eventNoteKey, eventNoteMapping } from '../domain/eventNoteMapping';
 import { isIcsCalendarContent, parseCalendarSetupFile } from '../domain/calendarImport';
 import { projectDisplayLabel } from '../domain/projectLabel';
 import { tomorrowScheduleSummary } from '../domain/tomorrowSchedule';
-import { dailyFocusTasks, plannerWeekRange, projectsNeedingAttention } from '../domain/plannerReview';
+import { dailyFocusTasks, plannerWeekRange, projectsNeedingAttention, projectsThisWeek } from '../domain/plannerReview';
 import { WeeklyReviewView } from './WeeklyReviewView';
 import { CalendarWeekView } from './CalendarWeekView';
 import { FolderPickerModal } from './FolderPickerModal';
@@ -182,6 +185,18 @@ async function readCalendarText(pathOrUri: string): Promise<string> {
   if (CalendarFile?.readTextFile) return CalendarFile.readTextFile(pathOrUri);
   const response = await fetch(pathOrUri.startsWith('file://') ? pathOrUri : `file://${pathOrUri}`);
   return response.text();
+}
+
+/** Whether this occurrence's project gives each session of a recurring event its own note. */
+function perSessionNotes(event: Pick<CalendarEvent, 'uid' | 'recurringSeriesId'>): boolean {
+  if (!event.recurringSeriesId) return false;
+  const projectId = calendarStorage.getMembership(event.recurringSeriesId).projectId;
+  return Boolean(projectId && calendarStorage.getProjects().find(project => project.id === projectId)?.recurringNotes === 'session');
+}
+
+/** The note linked to this occurrence, honouring its project's recurring-notes choice. */
+function eventNotePathFor(event: Pick<CalendarEvent, 'uid' | 'recurringSeriesId'>): string | undefined {
+  return eventNoteMapping(key => calendarStorage.getMapping(key), event, perSessionNotes(event))?.notePath || undefined;
 }
 
 function countPendingSyncItems(): number {
@@ -493,6 +508,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       }
     } catch (e) {}
 
+      // Before any sync can change anything.
+      await maybeAutoBackup();
+
       const needsInternet =
         settings.feeds.some(feed => Boolean(feed.enabled && feed.url)) ||
         settings.caldavEnabled ||
@@ -644,10 +662,125 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    * alone: those are the user's own and never came from a feed.
    */
   const applyFeedBatch = (fetched: CalendarEvent[]) => {
+    applyAutoFiling(fetched);
     const ownUids = new Set(calendarStorage.getUserEvents().map(e => e.uid));
     const stale = new Set([...feedUidsRef.current].filter(uid => !ownUids.has(uid)));
     feedUidsRef.current = new Set(fetched.map(e => e.uid).filter(Boolean));
     setAllParsedEvents(prev => [...prev.filter(e => !stale.has(e.uid)), ...fetched]);
+  };
+
+  /**
+   * Undo for the last project or file action. It is offered only while its
+   * message is showing, and runs only if nothing else in PARA has changed
+   * since; otherwise it would silently discard that later change.
+   */
+  type UndoOffer = {
+    message: string;
+    label: string;
+    before: RecordSnapshot;
+    after: string;
+    /** Reverses file moves first; returns a message if that could not be done. */
+    reverseFiles?: () => Promise<string | undefined>;
+  };
+  const [undoOffer, setUndoOffer] = useState<UndoOffer | null>(null);
+  const offerUndo = (message: string, label: string, before: RecordSnapshot, reverseFiles?: UndoOffer['reverseFiles']) => {
+    setStatusMsg(message);
+    setUndoOffer({ message, label, before, after: JSON.stringify(calendarStorage.snapshotRecords()), reverseFiles });
+  };
+  useEffect(() => {
+    if (undoOffer && statusMsg !== undoOffer.message) setUndoOffer(null);
+  }, [statusMsg, undoOffer]);
+
+  const handleUndo = trackWorkspaceOperation(async () => {
+    const offer = undoOffer;
+    setUndoOffer(null);
+    if (!offer) return;
+    if (JSON.stringify(calendarStorage.snapshotRecords()) !== offer.after) {
+      setStatusMsg(`Could not undo ${offer.label}: something else has changed since. Nothing was undone.`);
+      return;
+    }
+    if (offer.reverseFiles) {
+      const failure = await offer.reverseFiles();
+      if (failure) {
+        setStatusMsg(`Could not undo ${offer.label}: ${failure}`);
+        return;
+      }
+    }
+    calendarStorage.restoreRecords(offer.before);
+    const persistenceError = await calendarStorage.flush();
+    setProjects([...calendarStorage.getProjects()]);
+    setAreas([...calendarStorage.getAreas()]);
+    setResources([...calendarStorage.getResources()]);
+    setEventTypes([...calendarStorage.getEventTypes()]);
+    setMembershipRevision(value => value + 1);
+    setParaFilesRevision(value => value + 1);
+    setRefreshState(value => value + 1);
+    setOpenProject(current => (current
+      ? calendarStorage.getProjects().find(project => project.id === current.id) ?? null
+      : current));
+    setStatusMsg(persistenceError
+      ? `Undid ${offer.label} for this session, but it could not be saved: ${persistenceError}`
+      : `Undid ${offer.label}.`);
+  });
+
+  /**
+   * Saves today's automatic backup if it is on and not yet done today. The
+   * panel stays loaded between uses, so this also runs on each sync, not only
+   * when SNFolio first opens.
+   */
+  const autoBackupRunning = useRef(false);
+  const maybeAutoBackup = async () => {
+    const now = new Date();
+    if (autoBackupRunning.current || !calendarStorage.isLoaded() || !autoBackupDue(calendarStorage.getSettings(), now)) return;
+    autoBackupRunning.current = true;
+    try {
+      await createAutoBackup(calendarStorage, now);
+      calendarStorage.updateSettings({ lastAutoBackupDay: localDayKey(now) });
+    } catch (error: any) {
+      setStatusMsg(`Automatic backup did not complete: ${error?.message || 'unknown error'}. It will try again next time; you can also back up from Workspace Backup.`);
+    } finally {
+      autoBackupRunning.current = false;
+    }
+  };
+
+  /**
+   * Files subscribed-calendar and CalDAV items under the project whose
+   * auto-file words appear in their title. Never refiles: items already under
+   * a Project or Area, or once auto-filed and since unfiled by hand, are left.
+   */
+  const applyAutoFiling = (events: CalendarEvent[]): number => {
+    const candidates = calendarStorage.getProjects()
+      .filter(project => project.status === 'active' && autoFileWords(project.autoFileMatch).length > 0);
+    if (!candidates.length) return 0;
+    let filed = 0;
+    const seen = new Set<string>();
+    for (const event of events) {
+      if (event.isTask || event.isTaskMirror) continue;
+      if (event.sourceKind !== 'feed' && event.sourceKind !== 'caldav') continue;
+      const identity = noteIdentity(event);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      const membership = calendarStorage.getMembership(identity);
+      if (membership.projectId || membership.areaId || membership.autoFiledProjectId) continue;
+      const project = autoFileProject(event.summary || '', candidates);
+      if (!project) continue;
+      calendarStorage.setMembership(identity, { projectId: project.id, autoFiledProjectId: project.id });
+      filed++;
+    }
+    if (filed) setMembershipRevision(value => value + 1);
+    return filed;
+  };
+
+  const handleSetAutoFileMatch = (projectId: string, words: string) => {
+    const stored = calendarStorage.getProjects().find(project => project.id === projectId);
+    if (!stored) return;
+    calendarStorage.upsertProject({ ...stored, autoFileMatch: words || undefined });
+    setProjects([...calendarStorage.getProjects()]);
+    syncOpenProject(projectId);
+    const filed = words ? applyAutoFiling(allParsedEvents) : 0;
+    setStatusMsg(words
+      ? `Saved. ${filed} calendar item${filed === 1 ? '' : 's'} filed under ${stored.name} now; new ones are filed as calendars sync.`
+      : `Auto-filing turned off for ${stored.name}. Items already filed stay filed.`);
   };
 
   /**
@@ -659,6 +792,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     if (calendarStorage.getSettings().restoreSyncPaused || !calendarStorage.isLoaded()) {
       return { configured: 0, successful: 0, failed: 0, events: 0 };
     }
+    await maybeAutoBackup();
 
     const settings = calendarStorage.getSettings();
     const savedFeeds = settings.feeds || [];
@@ -1257,6 +1391,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     // Cache the read so the calendar is populated the next time the plugin
     // opens, instead of staying blank until a sync finishes.
     calendarStorage.setCaldavEvents(incoming);
+    applyAutoFiling(incoming);
 
     // Remember what the server holds now, so the next read can tell a deletion
     // apart from an item it has simply never seen.
@@ -1908,6 +2043,17 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setNoteCreationEvent(event);
   };
 
+  /**
+   * The week folder an event's note belongs in, when its project has weeks. A
+   * series notebook spans every week, so it stays in the project's own folder.
+   */
+  const eventNoteWeekFolder = (event: CalendarEvent): string | undefined => {
+    if (event.recurringSeriesId && !perSessionNotes(event)) return undefined;
+    const projectId = calendarStorage.getMembership(noteIdentity(event)).projectId;
+    const project = projectId ? calendarStorage.getProjects().find(candidate => candidate.id === projectId) : undefined;
+    return project ? weekFolderForDate(project, folderForParaItem('project', project), event.start) : undefined;
+  };
+
   const noteChoiceFor = (event: CalendarEvent, kind: 'meeting' | 'class'): EventNoteChoice => {
     const settings = calendarStorage.getSettings();
     const typeId = calendarStorage.getEventType(noteIdentity(event));
@@ -1930,7 +2076,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       calendarStorage.getAreas(),
       calendarStorage.getEventTypes()
     );
-    const contextFolder = paraEventNoteFolder(
+    const weekFolder = eventNoteWeekFolder(event);
+    const contextFolder = weekFolder || paraEventNoteFolder(
       settings,
       kind,
       project ? folderForParaItem('project', project) : undefined,
@@ -1939,7 +2086,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
 
     return {
       contextFolder,
-      contextLabel: project ? `Project: ${project.name}` : area ? `Area: ${area.name}` : undefined,
+      contextLabel: project
+        ? `Project: ${project.name}${weekFolder ? ` · ${weekFolder.split('/').pop()}` : ''}`
+        : area ? `Area: ${area.name}` : undefined,
       defaultFolder: normaliseFolderPath(destination.folder),
       defaultLabel: eventType?.folder ? `Event Type: ${eventType.name}` : `Standard ${kind === 'class' ? 'Class' : 'Meeting'} folder`,
       templateLabel: templateLabel(destination.template),
@@ -1949,7 +2098,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const suggestedEventNoteName = (event: CalendarEvent, kind: 'meeting' | 'class'): string =>
     generateNoteFilename(
       event,
-      Boolean(event.recurringSeriesId),
+      Boolean(event.recurringSeriesId) && !perSessionNotes(event),
       calendarStorage.getSettings().seriesNotebookPrefix,
       kind
     ).replace(/\.note$/i, '');
@@ -1980,7 +2129,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       kind,
       eventType,
       selectedFolder,
-      noteName
+      noteName,
+      perSessionNotes(event)
     );
     if (result.success) {
       const actionText = result.isNewFile ? 'Created' : `Appended page ${result.pageNum} of`;
@@ -2042,6 +2192,25 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
 
   // Project cards show the next two months of assigned events, including
   // expanded recurring occurrences. A bounded window keeps PARA responsive.
+  /** Every event in the selected week, one entry per occurrence, for the weekly review. */
+  const weekEventsForReview = useMemo(() => {
+    const { start } = plannerWeekRange(selectedDate, weekStartsOn);
+    const seen = new Set<string>();
+    const result: CalendarEvent[] = [];
+    for (let offset = 0; offset < 7; offset++) {
+      const day = new Date(start);
+      day.setDate(day.getDate() + offset);
+      for (const event of expandEventsForDate(allParsedEvents, day)) {
+        if (event.isTask || event.isTaskMirror) continue;
+        const key = `${event.uid}-${event.start.toISOString()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(event);
+      }
+    }
+    return result;
+  }, [allParsedEvents, selectedDate, weekStartsOn]);
+
   const paraUpcomingEvents = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -2168,9 +2337,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       const found: Record<string, string> = {};
 
       for (const evt of events) {
-        const mapped =
-          calendarStorage.getMapping(evt.uid) ||
-          (evt.recurringSeriesId ? calendarStorage.getMapping(evt.recurringSeriesId) : undefined);
+        const perSession = perSessionNotes(evt);
+        const mapped = eventNoteMapping(key => calendarStorage.getMapping(key), evt, perSession);
         if (mapped?.notePath) {
           found[evt.uid] = mapped.notePath;
           continue;
@@ -2178,7 +2346,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
 
         const name = generateNoteFilename(
           evt,
-          Boolean(evt.recurringSeriesId),
+          Boolean(evt.recurringSeriesId) && !perSession,
           settings.seriesNotebookPrefix,
           // Inlined rather than calling kindForEvent: that helper is rebuilt
           // every render, so listing it as a dependency would re-run this
@@ -2520,7 +2688,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    */
   const unlinkNoteForEvent = (event: CalendarEvent): string | null => {
     const identity = noteIdentity(event);
-    const mapping = calendarStorage.getMapping(identity);
+    const mapping = eventNoteMapping(key => calendarStorage.getMapping(key), event, perSessionNotes(event));
     const path = mapping?.notePath;
     if (!path) return null;
 
@@ -2566,7 +2734,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     if (!event) return;
 
     if (choice === 'event') {
-      const noteName = calendarStorage.getMapping(noteIdentity(event))?.notePath?.split('/').pop();
+      const noteName = eventNotePathFor(event)?.split('/').pop();
       const error = await removeEventEverywhere(event);
       if (error) {
         setStatusMsg(`Could not delete "${event.summary}" from CalDAV: ${error}`);
@@ -2624,7 +2792,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     }
     // A note is the one thing here that cannot be recreated, so its presence
     // is checked rather than assumed and the user is asked by name.
-    const notePath = calendarStorage.getMapping(noteIdentity(event))?.notePath;
+    const notePath = eventNotePathFor(event);
     if (notePath && !event.recurringSeriesId && !event.rrule) {
       setPendingDeleteEvent(event);
       setShowDeleteNoteModal(true);
@@ -3045,6 +3213,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     // touch files so a denied permission, unsupported rename, or plugin-panel
     // transition can never leave the item active.
     const moves = moveFolders ? archiveMovesFor(prompt) : [];
+    const before = calendarStorage.snapshotRecords();
     applyArchiveMetadata(prompt);
     const statusPersistenceError = await calendarStorage.flush();
     const verb = prompt.mode === 'archive' ? 'Archived' : 'Restored';
@@ -3061,9 +3230,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       setArchiveMoveBusy(false);
       const hadMove = prompt.mode === 'restore' && archiveMovesFor(prompt).length > 0;
       const finished = prompt.mode === 'restore' && prompt.kind === 'project' && (prompt.item as Project).status === 'done';
-      setStatusMsg(prompt.mode === 'restore' && !hadMove
+      const message = prompt.mode === 'restore' && !hadMove
         ? `${finished ? 'Reopened' : 'Restored'} ${prompt.kind} "${prompt.item.name}". Its folder is unchanged.`
-        : `${verb} ${prompt.kind} "${prompt.item.name}" without moving its folder.`);
+        : `${verb} ${prompt.kind} "${prompt.item.name}" without moving its folder.`;
+      if (prompt.mode === 'archive') offerUndo(message, 'Archive', before);
+      else setStatusMsg(message);
       return;
     }
 
@@ -3135,7 +3306,34 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     }
     setArchiveFolderPrompt(null);
     setArchiveMoveBusy(false);
-    setStatusMsg(`${verb} ${prompt.kind} "${prompt.item.name}" and moved ${completed.length === 1 ? 'its folder' : `${completed.length} folders`}.`);
+    const movedMessage = `${verb} ${prompt.kind} "${prompt.item.name}" and moved ${completed.length === 1 ? 'its folder' : `${completed.length} folders`}.`;
+    if (prompt.mode !== 'archive') {
+      setStatusMsg(movedMessage);
+      return;
+    }
+    offerUndo(movedMessage, 'Archive', before, async () => {
+      // Folders go back in reverse order; if one cannot, those already moved back are moved forward again.
+      const returned: ArchiveMove[] = [];
+      for (const move of [...completed].reverse()) {
+        const result = await moveParaFolder(move.destination, move.source);
+        if (!result.success) {
+          for (const prior of returned) await moveParaFolder(prior.source, prior.destination);
+          return `"${move.name}" could not be moved back (${result.message}). The ${prompt.kind} stays archived.`;
+        }
+        returned.push(move);
+      }
+      setEventNotePaths(current => Object.fromEntries(
+        Object.entries(current).map(([key, value]) => {
+          let next = value;
+          for (const move of completed) {
+            if (next === move.destination) next = move.source;
+            else if (next.startsWith(`${move.destination}/`)) next = `${move.source}${next.slice(move.destination.length)}`;
+          }
+          return [key, next];
+        })
+      ));
+      return undefined;
+    });
   });
 
   const handleArchiveProject = (project: Project) => {
@@ -3334,13 +3532,16 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     const project = projectId ? projects.find(candidate => candidate.id === projectId) : undefined;
     const areaId = areaOfTask(task.uid);
     const area = areaId ? areas.find(candidate => candidate.id === areaId) : undefined;
+    const weekFolder = project ? weekFolderForDate(project, folderForParaItem('project', project), task.dueDate) : undefined;
     return {
-      contextFolder: project
+      contextFolder: weekFolder || (project
         ? folderForParaItem('project', project)
         : area
           ? folderForParaItem('area', area)
-          : undefined,
-      contextLabel: project ? `Project: ${project.name}` : area ? `Area: ${area.name}` : undefined,
+          : undefined),
+      contextLabel: project
+        ? `Project: ${project.name}${weekFolder ? ` · ${weekFolder.split('/').pop()}` : ''}`
+        : area ? `Area: ${area.name}` : undefined,
       defaultFolder: normaliseFolderPath(settings.taskNotesDirectory || '/storage/emulated/0/Note/Task Notes'),
       defaultLabel: 'Standard Task Notes folder',
       templateLabel: templateLabel(settings.taskNoteTemplate || DEFAULT_SYSTEM_TEMPLATE),
@@ -3357,19 +3558,28 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setTaskNoteCreationTarget(task);
   };
 
-  const saveNoteLink = (identity: string, path: string) => {
-    calendarStorage.setMapping({ eventUid: identity, seriesId: identity, notePath: path, lastPageNum: 1, lastCreatedIso: new Date().toISOString() });
+  const saveNoteLink = (identity: string, path: string, event?: CalendarEvent) => {
+    // A session's own note keeps its series id (for its Project) without becoming the series notebook.
+    const session = event && event.recurringSeriesId && identity === event.uid ? event : undefined;
+    calendarStorage.setMapping({
+      eventUid: identity,
+      seriesId: session?.recurringSeriesId || identity,
+      notePath: path,
+      lastPageNum: 1,
+      lastCreatedIso: new Date().toISOString(),
+      ...(session ? { perSession: true, eventStartIso: session.start.toISOString() } : {}),
+    });
     setMembershipRevision(value => value + 1);
   };
   const closeNoteDialogs = () => {
     setTaskNoteCreationTarget(null); setShowItemCreationModal(false);
     setShowTaskList(false); setDetailEvent(null);
   };
-  const linkExistingNote = trackWorkspaceOperation(async (identity: string) => {
+  const linkExistingNote = trackWorkspaceOperation(async (identity: string, event?: CalendarEvent) => {
     closeNoteDialogs();
     try {
       const path = await pickLinkedNote();
-      if (path) { saveNoteLink(identity, path); setStatusMsg(`Linked ${path.split('/').pop()}.`); }
+      if (path) { saveNoteLink(identity, path, event); setStatusMsg(`Linked ${path.split('/').pop()}.`); }
       else setStatusMsg('Note linking canceled.');
     } catch (error: any) { setStatusMsg(error?.message || 'Could not link note.'); }
   });
@@ -3457,10 +3667,16 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       seen.add(`${identity}|${mapping.notePath}`);
       const task = tasks.find(item => item.uid === identity);
       const event = storedEvents.find(item => item.uid === identity);
+      // A session's own note is dated by its session; a series notebook by the series' first event.
+      const start = mapping.eventStartIso ? new Date(mapping.eventStartIso) : event?.start;
+      const eventDate = start
+        ? ` (${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
+        : '';
       out.push({
         label: mapping.notePath.split('/').pop() || 'Note',
         path: mapping.notePath,
-        date: task ? task.dueDate : event?.start,
+        date: task ? task.dueDate : start,
+        source: task ? `Task: ${task.title}` : event ? `${event.summary}${eventDate}` : undefined,
       });
     }
     return out;
@@ -3546,6 +3762,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       // An unreadable current file must not block the move; the rename itself refuses a locked file.
     }
     const linked = Object.values(calendarStorage.getAllMappings()).some(mapping => mapping?.notePath === path);
+    const before = calendarStorage.snapshotRecords();
     const result = await moveFileToFolder(path, destinationFolder);
     if (!result.success || !result.path) throw new Error(result.message);
     const destination = result.path;
@@ -3555,14 +3772,22 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     ));
     setMembershipRevision(value => value + 1);
     setParaFilesRevision(value => value + 1);
-    setStatusMsg(`${result.message}${linked ? ' Its SNFolio links were updated.' : ''}`);
+    const sourceFolder = path.slice(0, path.lastIndexOf('/'));
+    offerUndo(`${result.message}${linked ? ' Its SNFolio links were updated.' : ''}`, 'the move', before, async () => {
+      const back = await moveFileToFolder(destination, sourceFolder);
+      if (!back.success) return back.message;
+      setEventNotePaths(current => Object.fromEntries(
+        Object.entries(current).map(([key, value]) => [key, value === destination ? path : value])
+      ));
+      return undefined;
+    });
   };
 
-  /** Class projects: Week 01 … Week NN from the class start to the due date; existing folders are kept. */
+  /** Week 01 … Week NN from the project's start date to its due date; existing folders are kept. */
   const handleCreateWeekFolders = trackWorkspaceOperation(async (projectId: string) => {
     const project = calendarStorage.getProjects().find(item => item.id === projectId);
     if (!project?.classStartDate || !project.dueDate) {
-      setStatusMsg('Set the class start date and a due date first.');
+      setStatusMsg('Set the start date and a due date first.');
       return;
     }
     const root = paraFolder('project', project).replace(/\/+$/, '');
@@ -3924,7 +4149,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       ...tasks.map(task => [task.uid, resolveTaskDesignation(calendarStorage.getMembership(task.uid), projects)]),
     ])}>
     <LinkedFilePathsContext.Provider value={Object.fromEntries(
-      Object.entries(calendarStorage.getAllMappings()).map(([identity, mapping]) => [identity, mapping.notePath])
+      Object.entries(calendarStorage.getAllMappings())
+        // With one note per session, a series notebook is not every session's note.
+        .filter(([, mapping]) => mapping.perSession || !mapping.seriesId || mapping.seriesId === mapping.eventUid ||
+          !perSessionNotes({ uid: mapping.eventUid, recurringSeriesId: mapping.seriesId }))
+        .map(([identity, mapping]) => [identity, mapping.notePath])
     )}>
     <TimeFormatContext.Provider value={timeFormat}>
     <SafeAreaView style={styles.root}>
@@ -4211,8 +4440,13 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       />
 
       {statusMsg !== '' && (
-        <View style={styles.statusBanner}>
-          <Text allowFontScaling={false} style={styles.statusText}>{statusMsg}</Text>
+        <View style={[styles.statusBanner, undoOffer && styles.statusBannerWithUndo]}>
+          <Text allowFontScaling={false} style={[styles.statusText, undoOffer && styles.statusTextWithUndo]}>{statusMsg}</Text>
+          {undoOffer && (
+            <TouchableOpacity accessibilityRole="button" style={styles.undoButton} onPress={() => void handleUndo()}>
+              <Text allowFontScaling={false} style={styles.undoButtonText}>Undo</Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -4279,12 +4513,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             </Text>
             <Text allowFontScaling={false} style={styles.previewHint}>
               It has a note:{' '}
-              {pendingDeleteEvent
-                ? calendarStorage
-                    .getMapping(noteIdentity(pendingDeleteEvent))
-                    ?.notePath?.split('/')
-                    .pop()
-                : ''}
+              {pendingDeleteEvent ? eventNotePathFor(pendingDeleteEvent)?.split('/').pop() : ''}
             </Text>
 
             <TouchableOpacity
@@ -4351,7 +4580,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             noteCreationEvent,
             calendarStorage.getEventKind(noteIdentity(noteCreationEvent)) === 'class' ? 'class' : 'meeting'
           )}
-          preferContext={Boolean(calendarStorage.getSettings().routeEventNotesToPara)}
+          preferContext={Boolean(calendarStorage.getSettings().routeEventNotesToPara) ||
+            // A week folder is a destination the user set up for this project, so it is the first choice.
+            Boolean(eventNoteWeekFolder(noteCreationEvent))}
           meeting={noteChoiceFor(noteCreationEvent, 'meeting')}
           classNote={noteChoiceFor(noteCreationEvent, 'class')}
           onCancel={() => setNoteCreationEvent(null)}
@@ -5686,8 +5917,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             }}
             onCopy={event => void handleCopyFeedEvent(event)}
             onHide={handleHideFeedEvent}
-            onLinkNote={event => { void linkExistingNote(noteIdentity(event)); }}
-            onUnlinkNote={event => unlinkExistingNote(noteIdentity(event))}
+            onLinkNote={event => { void linkExistingNote(eventNoteKey(event, perSessionNotes(event)), event); }}
+            onUnlinkNote={event => unlinkExistingNote(eventNoteKey(event, perSessionNotes(event)))}
             notePath={detailEvent ? eventNotePaths[detailEvent.uid] : undefined}
             onNoteAction={(event, existingPath) => {
               setDetailEvent(null);
@@ -5733,7 +5964,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             onCreateTask={handleCreateNewTask}
             editingTask={editingTask}
             eventNotePath={editingEvent ? eventNotePaths[editingEvent.uid] : undefined}
-            onLinkEventNote={event => { void linkExistingNote(noteIdentity(event)); }}
+            onLinkEventNote={event => { void linkExistingNote(eventNoteKey(event, perSessionNotes(event)), event); }}
             onEventNoteAction={(event, path) => {
               setShowItemCreationModal(false);
               if (path) void handleOpenExistingNote(path);
@@ -5885,6 +6116,17 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               onSetClassStart={() => { setProjectDateField('classStartDate'); setProjectDueTarget(openProject); }}
               onCreateWeekFolders={() => void handleCreateWeekFolders(openProject.id)}
               onMoveFile={handleMoveParaFile}
+              onSetRecurringNotes={mode => {
+                const stored = calendarStorage.getProjects().find(project => project.id === openProject.id);
+                if (!stored) return;
+                calendarStorage.upsertProject({ ...stored, recurringNotes: mode === 'series' ? undefined : mode });
+                setProjects([...calendarStorage.getProjects()]);
+                syncOpenProject(stored.id);
+              }}
+              onSetAutoFileMatch={words => handleSetAutoFileMatch(openProject.id, words)}
+              upcomingEvents={paraUpcomingEvents.filter(event =>
+                calendarStorage.getMembership(noteIdentity(event)).projectId === openProject.id)}
+              onOpenEvent={handleOpenEventDetails}
               onSetClassWeekStart={day => {
                 const stored = calendarStorage.getProjects().find(project => project.id === openProject.id);
                 if (!stored) return;
@@ -5893,13 +6135,6 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 syncOpenProject(stored.id);
               }}
               filesRevision={paraFilesRevision}
-              onSetLinkedFilesGrouping={grouping => {
-                const stored = calendarStorage.getProjects().find(project => project.id === openProject.id);
-                if (!stored) return;
-                calendarStorage.upsertProject({ ...stored, linkedFilesGrouping: grouping });
-                setProjects([...calendarStorage.getProjects()]);
-                syncOpenProject(stored.id);
-              }}
               onAssignArea={areaId => handleAssignProjectArea(openProject.id, areaId)}
               onCreateArea={handleCreateArea}
               onUpdateClassification={(category, defaultEventDesignation) => {
@@ -5915,17 +6150,24 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 syncOpenProject(openProject.id);
               }}
               onToggleStatus={() => {
+                const before = calendarStorage.snapshotRecords();
                 const next = openProject.status === 'active' ? 'done' : 'active';
                 handleSetProjectStatus(openProject.id, next);
                 syncOpenProject(openProject.id);
-                if (next === 'done') setStatusMsg(`Marked "${openProject.name}" complete. It is in PARA → Archive → Projects; open it there and tap Reopen to bring it back.`);
+                if (next === 'done') offerUndo(`Marked "${openProject.name}" complete. It is in PARA → Archive → Projects; open it there and tap Reopen to bring it back.`, 'Mark Complete', before);
               }}
               onArchive={() => handleArchiveProject(openProject)}
-              onConvertToArea={() => handleConvertProjectToArea(openProject)}
+              onConvertToArea={() => {
+                const before = calendarStorage.snapshotRecords();
+                handleConvertProjectToArea(openProject);
+                offerUndo(`Moved "${openProject.name}" to Areas. Its folder and filed items were kept.`, 'Move to Areas', before);
+              }}
               onDelete={() => {
+                const before = calendarStorage.snapshotRecords();
                 handleDeleteProject(openProject.id);
                 // Nothing left to show, so fall back to the list.
                 setOpenProject(null);
+                offerUndo(`Deleted project "${openProject.name}". Its tasks and files were kept.`, 'Delete', before);
               }}
               folder={paraFolder('project', openProject)}
               onListEntries={folder => handleListParaEntries('project', openProject, folder)}
@@ -6266,6 +6508,17 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               projects={projects}
               projectOf={projectOfTask}
               journalDates={weekJournalDates}
+              projectWeeks={projectsThisWeek(
+                projects,
+                tasks,
+                weekEventsForReview,
+                projectOfTask,
+                event => calendarStorage.getMembership(noteIdentity(event)).projectId,
+                linkedNotesForProject,
+                selectedDate,
+                weekStartsOn,
+              )}
+              onOpenFile={path => void handleOpenExistingNote(path)}
               weeklyNoteExists={weeklyNoteExists}
               onOpenWeeklyNote={() => void handleOpenWeeklyNote()}
               onEditTask={handleEditTask}
@@ -6408,6 +6661,21 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 13,
   },
+  statusBannerWithUndo: { flexDirection: 'row', alignItems: 'center' },
+  statusTextWithUndo: { flex: 1 },
+  undoButton: {
+    minHeight: 40,
+    minWidth: 88,
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+    paddingHorizontal: 12,
+  },
+  undoButtonText: { fontSize: 15, fontWeight: 'bold', color: '#000000' },
   mainContent: {
     flex: 1,
   },

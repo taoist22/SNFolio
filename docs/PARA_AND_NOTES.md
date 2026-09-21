@@ -49,4 +49,4 @@ Before opening another note, SNFolio clears transient recognition and lasso stat
 
 For a task or event, choose **Link Note / PDF** to browse for a Supernote `.note` file or a PDF. Linking never changes the file. The item then offers **Open Note** for a note, which opens in the note editor, or **Open PDF** for a PDF, which opens in the document reader. Task note actions appear above the compact Save Task and Delete controls, and All Tasks also offers Link Note / PDF for tasks without a linked file.
 
-Inside a Project, **Project Files** lists the Project's folder, and **Linked Files** lists the notes and PDFs linked to the Project's events and tasks, wherever they are stored. See the README for Project categories and the C/M calendar markers.
+Inside a Project, **Project Files** lists the Project's folder. Files linked to the Project's events and tasks show 🔗 and what they are linked to; linked files stored outside the folder are listed under **Linked from elsewhere**. See the README for Project categories and the C/M calendar markers.

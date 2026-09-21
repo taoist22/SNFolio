@@ -124,6 +124,29 @@ describe('meetingNoteService', () => {
     expect(PluginFileAPI.insertNotePage).toHaveBeenCalled();
   });
 
+  test('one note per session: each session gets its own dated note instead of a page in the series notebook', async () => {
+    (PluginFileAPI.createNote as jest.Mock).mockClear().mockResolvedValue({ success: true, result: true });
+    (PluginFileAPI.insertNotePage as jest.Mock).mockClear();
+    const seriesNote = { eventUid: 'lecture_20260902', seriesId: 'lecture', notePath: '/N/Course - Lecture.note', lastPageNum: 2, lastCreatedIso: '' };
+    calendarStorage.setMapping(seriesNote);
+    const session: CalendarEvent = {
+      ...sampleEvent, uid: 'lecture_20260930', summary: 'Lecture', recurringSeriesId: 'lecture',
+      start: new Date('2026-09-30T15:00:00Z'), end: new Date('2026-09-30T16:00:00Z'),
+    };
+    const res = await meetingNoteService.createOrAppendMeetingNote(
+      session, false, 'class', undefined, '/N/IDS105/Week 05', undefined, true);
+    expect(res.success).toBe(true);
+    expect(res.isNewFile).toBe(true);
+    expect(res.notePath).toBe('/N/IDS105/Week 05/2026-09-30 - Lecture.note');
+    expect(PluginFileAPI.insertNotePage).not.toHaveBeenCalled();
+    const mapping = calendarStorage.getMapping('lecture_20260930');
+    expect(mapping?.perSession).toBe(true);
+    expect(mapping?.seriesId).toBe('lecture');
+    expect(mapping?.eventStartIso).toBe('2026-09-30T15:00:00.000Z');
+    // The series notebook link is untouched.
+    expect(calendarStorage.getMapping('lecture')?.notePath).toBe('/N/Course - Lecture.note');
+  });
+
   test('fails cleanly when appending a recurring notebook page fails', async () => {
     (PluginFileAPI.getNoteTotalPageNum as jest.Mock).mockResolvedValueOnce({ success: true, result: 3 });
     (PluginFileAPI.insertNotePage as jest.Mock).mockResolvedValueOnce({

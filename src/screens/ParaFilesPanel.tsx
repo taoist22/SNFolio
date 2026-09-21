@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { ParaFolderEntry } from '../supernote/exportService';
+import { weekFolderNumber } from '../domain/linkedFileWeeks';
 import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingTextInput';
 
 interface ParaFilesPanelProps {
@@ -17,6 +18,13 @@ interface ParaFilesPanelProps {
   currentSubfolder?: string;
   /** Moves a file into another folder; rejects with a message the panel shows. */
   onMoveFile?: (path: string, destinationFolder: string) => Promise<void>;
+  /** What a file is linked to, shown under it with 🔗; undefined for files not linked to anything. */
+  linkCaption?: (path: string) => string | undefined;
+  /**
+   * Week numbers whose "Week NN" folders are listed directly. The rest are
+   * under an "All weeks" row. Undefined lists every folder.
+   */
+  weekWindow?: number[];
 }
 
 type SectionState = { loading: boolean; entries: ParaFolderEntry[]; error: string };
@@ -45,6 +53,8 @@ export function ParaFilesPanel({
   onChooseFolder,
   currentSubfolder,
   onMoveFile,
+  linkCaption,
+  weekWindow,
 }: ParaFilesPanelProps): React.JSX.Element {
   const [entries, setEntries] = React.useState<ParaFolderEntry[]>([]);
   const [viewFolder, setViewFolder] = React.useState<string>(folder);
@@ -61,6 +71,7 @@ export function ParaFilesPanel({
   const [moveBusy, setMoveBusy] = React.useState<boolean>(false);
   const [moveMessage, setMoveMessage] = React.useState<string>('');
   const currentOpenedFor = React.useRef<string>('');
+  const [allWeeksOpen, setAllWeeksOpen] = React.useState<boolean>(false);
 
   // Parent callbacks change on ordinary renders (including activity tracking).
   // Keep the latest reader without making callback identity trigger another read.
@@ -106,6 +117,7 @@ export function ParaFilesPanel({
     setMoveMessage('');
     setOpen({});
     setSections({});
+    setAllWeeksOpen(false);
   }, [itemKey, folder]);
 
   React.useEffect(() => {
@@ -118,6 +130,12 @@ export function ParaFilesPanel({
   const files = atItemFolder ? entries.filter(entry => !entry.isFolder) : entries;
   const current = currentSubfolder ? trim(currentSubfolder) : undefined;
   const currentExists = Boolean(current && subfolders.some(entry => trim(entry.path) === current));
+  // A long class lists only the weeks around now; the rest wait under All weeks.
+  const weekFolders = weekWindow ? subfolders.filter(entry => weekFolderNumber(entry.name) !== undefined) : [];
+  const otherFolders = weekWindow ? subfolders.filter(entry => weekFolderNumber(entry.name) === undefined) : subfolders;
+  const windowedWeeks = weekFolders.filter(entry => weekWindow?.includes(weekFolderNumber(entry.name) as number));
+  const trimsWeeks = windowedWeeks.length < weekFolders.length;
+  const listedFolders = !trimsWeeks ? subfolders : allWeeksOpen ? otherFolders : [...otherFolders, ...windowedWeeks];
 
   // This week's section starts open, once per visit.
   React.useEffect(() => {
@@ -210,13 +228,22 @@ export function ParaFilesPanel({
     </View>
   );
 
+  const caption = (entry: ParaFolderEntry) => (entry.isFolder || !linkCaption ? undefined : linkCaption(entry.path));
+
   const fileRow = (entry: ParaFolderEntry, indent = false) => (
     <View key={entry.path}>
       <View style={[styles.fileRow, indent && styles.indented]}>
         <TouchableOpacity style={styles.fileOpen}
           onPress={() => entry.isFolder ? setViewFolder(entry.path) : onOpenFile(entry.path)}>
           <Text allowFontScaling={false} style={styles.fileIcon}>{entry.isFolder ? '📁' : fileIcon(entry.path)}</Text>
-          <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>{entry.name}</Text>
+          <View style={styles.fileText}>
+            <Text allowFontScaling={false} style={styles.fileName} numberOfLines={1}>
+              {caption(entry) ? `${entry.name}  🔗` : entry.name}
+            </Text>
+            {Boolean(caption(entry)) && (
+              <Text allowFontScaling={false} style={styles.caption} numberOfLines={1}>{`↳ ${caption(entry)}`}</Text>
+            )}
+          </View>
           <Text allowFontScaling={false} style={styles.openText}>{entry.isFolder ? 'Browse' : 'Open'}</Text>
         </TouchableOpacity>
         {!entry.isFolder && onMoveFile && !choosing && (
@@ -250,6 +277,44 @@ export function ParaFilesPanel({
       )}
     </View>
   );
+
+  const section = (entry: ParaFolderEntry) => {
+    const path = trim(entry.path);
+    const isOpen = Boolean(open[path]);
+    const state = sections[path];
+    return (
+      <View key={path}>
+        <TouchableOpacity style={styles.sectionHeader} onPress={() => toggleSection(path)}
+          accessibilityRole="button" accessibilityState={{ expanded: isOpen }}>
+          <Text allowFontScaling={false} style={styles.sectionTitle} numberOfLines={1}>
+            {isOpen ? '▾' : '▸'} 📁 {entry.name}
+            {state && !state.loading ? `  (${state.entries.length})` : ''}
+            {path === current ? '  · this week' : ''}
+          </Text>
+        </TouchableOpacity>
+        {isOpen && (
+          <View>
+            {state?.loading && <Text allowFontScaling={false} style={[styles.hint, styles.indented]}>Reading folder…</Text>}
+            {Boolean(state?.error) && <Text allowFontScaling={false} style={[styles.error, styles.indented]}>{state?.error}</Text>}
+            {state && !state.loading && !state.error && state.entries.length === 0 && (
+              <Text allowFontScaling={false} style={[styles.hint, styles.indented]}>Empty.</Text>
+            )}
+            {state && !state.loading && state.entries.map(child => fileRow(child, true))}
+            {addingIn !== null && trim(addingIn) === path && trim(addingIn) !== trim(topNoteFolder)
+              ? <View style={styles.indented}>{noteForm(path)}</View>
+              : addingIn !== null && trim(addingIn) === path ? null : (
+                <TouchableOpacity style={[styles.button, styles.indented, styles.inlineAdd]} onPress={() => {
+                  setAddingIn(path);
+                  setNoteName('');
+                }}>
+                  <Text allowFontScaling={false} style={styles.buttonText}>+ New Note in {entry.name}</Text>
+                </TouchableOpacity>
+              )}
+          </View>
+        )}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -312,43 +377,19 @@ export function ParaFilesPanel({
       )}
       {!loading && files.map(entry => fileRow(entry))}
 
-      {!loading && subfolders.map(entry => {
-        const path = trim(entry.path);
-        const isOpen = Boolean(open[path]);
-        const section = sections[path];
-        return (
-          <View key={path}>
-            <TouchableOpacity style={styles.sectionHeader} onPress={() => toggleSection(path)}
-              accessibilityRole="button" accessibilityState={{ expanded: isOpen }}>
-              <Text allowFontScaling={false} style={styles.sectionTitle} numberOfLines={1}>
-                {isOpen ? '▾' : '▸'} 📁 {entry.name}
-                {section && !section.loading ? `  (${section.entries.length})` : ''}
-                {path === current ? '  · this week' : ''}
-              </Text>
-            </TouchableOpacity>
-            {isOpen && (
-              <View>
-                {section?.loading && <Text allowFontScaling={false} style={[styles.hint, styles.indented]}>Reading folder…</Text>}
-                {Boolean(section?.error) && <Text allowFontScaling={false} style={[styles.error, styles.indented]}>{section?.error}</Text>}
-                {section && !section.loading && !section.error && section.entries.length === 0 && (
-                  <Text allowFontScaling={false} style={[styles.hint, styles.indented]}>Empty.</Text>
-                )}
-                {section && !section.loading && section.entries.map(child => fileRow(child, true))}
-                {addingIn !== null && trim(addingIn) === path && trim(addingIn) !== trim(topNoteFolder)
-                  ? <View style={styles.indented}>{noteForm(path)}</View>
-                  : addingIn !== null && trim(addingIn) === path ? null : (
-                    <TouchableOpacity style={[styles.button, styles.indented, styles.inlineAdd]} onPress={() => {
-                      setAddingIn(path);
-                      setNoteName('');
-                    }}>
-                      <Text allowFontScaling={false} style={styles.buttonText}>+ New Note in {entry.name}</Text>
-                    </TouchableOpacity>
-                  )}
-              </View>
-            )}
-          </View>
-        );
-      })}
+      {!loading && listedFolders.map(entry => section(entry))}
+
+      {!loading && trimsWeeks && (
+        <TouchableOpacity style={styles.sectionHeader} onPress={() => setAllWeeksOpen(value => !value)}
+          accessibilityRole="button" accessibilityState={{ expanded: allWeeksOpen }}>
+          <Text allowFontScaling={false} style={styles.sectionTitle}>
+            {`${allWeeksOpen ? '▾' : '▸'} All weeks (${weekFolders.length})`}
+          </Text>
+        </TouchableOpacity>
+      )}
+      {!loading && trimsWeeks && allWeeksOpen && (
+        <View style={styles.indented}>{weekFolders.map(entry => section(entry))}</View>
+      )}
     </View>
   );
 }
@@ -419,6 +460,8 @@ const styles = StyleSheet.create({
   sectionHeader: { borderBottomWidth: 1, borderBottomColor: '#b0b0b0', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 4 },
   sectionTitle: { fontSize: 13, fontWeight: 'bold', color: '#000000' },
   fileIcon: { fontSize: 14, marginRight: 7 },
-  fileName: { flex: 1, fontSize: 12, color: '#000000' },
+  fileText: { flex: 1 },
+  fileName: { fontSize: 12, color: '#000000' },
+  caption: { fontSize: 11, color: '#505050', marginTop: 1 },
   openText: { fontSize: 11, fontWeight: 'bold', color: '#000000' },
 });

@@ -932,3 +932,35 @@ describe('failed loads never overwrite saved data', () => {
     expect(await AsyncStorage.getItem('@sn-calendar/settings')).toBeNull();
   });
 });
+
+describe('per-session notes and undo records', () => {
+  test('a per-session note is stored under its session only, not as the series notebook', () => {
+    const store = new CalendarStorage();
+    store.setMapping({ eventUid: 'lec_1', seriesId: 'lec', notePath: '/N/Series.note', lastPageNum: 1, lastCreatedIso: '' });
+    store.setMapping({ eventUid: 'lec_2', seriesId: 'lec', notePath: '/N/Week 02/Session.note', lastPageNum: 1, lastCreatedIso: '', perSession: true, eventStartIso: '2026-09-09T10:00:00.000Z' });
+    expect(store.getMapping('lec')?.notePath).toBe('/N/Series.note');
+    expect(store.getMapping('lec_2')?.notePath).toBe('/N/Week 02/Session.note');
+    store.unlinkMapping('lec_2');
+    expect(store.getMapping('lec_2')).toBeUndefined();
+    expect(store.getMapping('lec')?.notePath).toBe('/N/Series.note');
+  });
+
+  test('restoreRecords puts back projects, areas, filing and note links exactly as snapshotted', () => {
+    const store = new CalendarStorage();
+    store.upsertProject({ id: 'p', name: 'IDS105', status: 'active', createdAt: new Date(2026, 8, 1) });
+    store.setMembership('task-1', { projectId: 'p' });
+    store.setMapping({ eventUid: 'task-1', seriesId: 'task-1', notePath: '/N/A.note', lastPageNum: 1, lastCreatedIso: '' });
+    const before = store.snapshotRecords();
+    store.upsertProject({ ...store.getProjects()[0], status: 'done', completedAt: new Date() });
+    store.setMembership('task-1', { projectId: undefined });
+    store.rewritePathPrefix('/N/A.note', '/N/Week 01/A.note');
+    store.restoreRecords(before);
+    expect(store.getProjects()[0].status).toBe('active');
+    expect(store.getProjects()[0].completedAt).toBeUndefined();
+    expect(store.getMembership('task-1').projectId).toBe('p');
+    expect(store.getMapping('task-1')?.notePath).toBe('/N/A.note');
+    // Restored records are copies: changing the store afterwards leaves the snapshot intact.
+    store.upsertProject({ ...store.getProjects()[0], name: 'Renamed' });
+    expect(before.projects[0].name).toBe('IDS105');
+  });
+});

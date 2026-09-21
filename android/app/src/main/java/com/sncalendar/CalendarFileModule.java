@@ -503,6 +503,39 @@ public class CalendarFileModule extends ReactContextBaseJavaModule {
         }
     }
 
+    /**
+     * Replaces one of the seven rotating automatic backups (SNFolio Auto Backup - Mon … Sun).
+     * Only those names in the SNFolio Backups folder can be replaced, so a manual
+     * backup is never overwritten. The new copy is finished before it replaces the old one.
+     */
+    @ReactMethod
+    public void writeAutoBackupFile(String path, String content, Promise promise) {
+        File temporary = null;
+        try {
+            File target = new File(path).getCanonicalFile();
+            File parent = target.getParentFile();
+            String name = target.getName();
+            if (!target.getPath().startsWith("/storage/") || parent == null || !"SNFolio Backups".equals(parent.getName())
+                    || !name.startsWith("SNFolio Auto Backup - ") || !name.endsWith(".snfolio.json")) {
+                throw new IllegalArgumentException("Not an automatic backup path");
+            }
+            if (!parent.exists() && !parent.mkdirs()) throw new IllegalStateException("Could not create backup folder");
+            temporary = File.createTempFile(".snfolio-auto-", ".tmp", parent);
+            try (FileOutputStream output = new FileOutputStream(temporary)) {
+                output.write(content.getBytes(StandardCharsets.UTF_8));
+                output.flush();
+                output.getFD().sync();
+            }
+            // rename(2) replaces the old file in one step; the old copy stays until the new one is complete.
+            if (!temporary.renameTo(target)) throw new IllegalStateException("Could not finalize backup");
+            promise.resolve(target.getAbsolutePath());
+        } catch (Throwable error) {
+            promise.reject("E_BACKUP_WRITE", error.getMessage(), error);
+        } finally {
+            if (temporary != null && temporary.exists()) temporary.delete();
+        }
+    }
+
     @ReactMethod
     public void writeTextFile(String path, String content, Promise promise) {
         if (path == null || path.length() == 0) {

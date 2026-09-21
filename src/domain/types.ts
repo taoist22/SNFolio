@@ -57,15 +57,28 @@ export interface Project {
   /** The Area this project serves, if any. */
   areaId?: string;
   dueDate?: Date;
-  /** Class projects: the date of the first class. Week 1 is the week containing it. */
+  /**
+   * The project's start date (any category; named for its first use, classes).
+   * Week 1 is the week containing it.
+   */
   classStartDate?: Date;
   /**
-   * Class projects: the weekday a class week begins (0 = Sunday). Absent means
-   * weeks run seven days from the class start date, whatever weekday that is.
+   * The weekday a project week begins (0 = Sunday). Absent means weeks run
+   * seven days from the start date, whatever weekday that is.
    */
   classWeekStartsOn?: number;
-  /** Class projects: how Linked Files are listed. Absent means one flat list. */
+  /** Retired: Linked Files grouping. Kept so older workspaces still load and restore. */
   linkedFilesGrouping?: 'none' | 'week';
+  /**
+   * Notes for this project's recurring events: one notebook for the whole
+   * series (absent, the default) or a separate note for each session.
+   */
+  recurringNotes?: 'series' | 'session';
+  /**
+   * Calendar-feed and CalDAV items whose title contains any of these
+   * comma-separated words are filed under this project, unless already filed.
+   */
+  autoFileMatch?: string;
   status: ProjectStatus;
   /**
    * Where this project's notes are filed, overriding the per-kind folder, and
@@ -109,6 +122,11 @@ export interface Resource {
  * alike rather than each carrying its own fields.
  */
 export interface ItemMembership {
+  /**
+   * Set when a project's auto-file words filed this item. If the item is later
+   * unfiled by hand it stays unfiled: the rule does not file it again.
+   */
+  autoFiledProjectId?: string;
   /** Omitted follows the Project; explicit None suppresses its calendar marker. */
   eventDesignation?: EventDesignation;
   areaId?: string;
@@ -354,6 +372,10 @@ export interface CalendarSettings {
   taskNoteTemplate?: string;
   /** Whether Create Note initially selects its Project/Area rather than its standard folder. */
   routeEventNotesToPara?: boolean;
+  /** Save a workspace backup once a day when SNFolio opens (Mon … Sun files, each overwritten a week later). */
+  autoBackupEnabled?: boolean;
+  /** Local date (YYYY-MM-DD) of the last automatic backup. */
+  lastAutoBackupDay?: string;
   /** Relative subfolders used beneath a Project/Area; blank means its root. */
   meetingParaSubpath?: string;
   classParaSubpath?: string;
@@ -392,4 +414,11 @@ export interface MeetingNoteMapping {
   notePath: string;
   lastPageNum: number;
   lastCreatedIso: string;
+  /**
+   * A note for one session of a recurring event. Stored only under that
+   * session's uid, so it does not become the whole series' notebook.
+   */
+  perSession?: boolean;
+  /** The session's start, for per-session notes (the series has no single date). */
+  eventStartIso?: string;
 }

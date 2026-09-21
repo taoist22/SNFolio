@@ -15,6 +15,8 @@ export function WorkspaceBackupPanel({ disabled, onRestored, onClose = () => {} 
   const [message, setMessage] = useState('');
   const [safetyPath, setSafetyPath] = useState('');
   const [failedRestore, setFailedRestore] = useState(false);
+  const [autoBackup, setAutoBackup] = useState(calendarStorage.getSettings().autoBackupEnabled !== false);
+  const lastAuto = calendarStorage.getSettings().lastAutoBackupDay;
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!running.current && !failedRestore) onClose();
@@ -49,6 +51,21 @@ export function WorkspaceBackupPanel({ disabled, onRestored, onClose = () => {} 
       Notes and other linked files are separate: back them up too. Passwords and private subscription URLs are excluded.
       Backups contain personal planning data in plain text. Copy them off the device for protection against device loss.
     </Text>
+    <TouchableOpacity accessibilityRole="switch" accessibilityState={{ checked: autoBackup }}
+      style={styles.toggleRow} onPress={() => {
+        const next = !autoBackup;
+        calendarStorage.updateSettings({ autoBackupEnabled: next });
+        setAutoBackup(next);
+      }}>
+      <Text allowFontScaling={false} style={styles.toggleText}>
+        {`${autoBackup ? '☑' : '☐'} Automatic daily backup`}
+      </Text>
+      <Text allowFontScaling={false} style={styles.text}>
+        {autoBackup
+          ? `Once a day, when SNFolio opens or syncs, it saves "SNFolio Auto Backup - <weekday>" in Export / SNFolio Backups, replacing last week's file for that day. Seven days are kept; your own backups are never replaced.${lastAuto ? ` Last automatic backup: ${lastAuto}.` : ''}`
+          : 'Off. Only backups you create below are saved.'}
+      </Text>
+    </TouchableOpacity>
     {button('Create Backup', () => { setBackup(null); setSafetyPath(''); void run(async () => {
       setMessage(`Backup saved and verified:\n${await createWorkspaceBackup(calendarStorage)}`);
     }); }, disabled || busy || failedRestore)}
@@ -94,6 +111,8 @@ const styles = StyleSheet.create({
   heading: { fontSize: 18, fontWeight: 'bold', marginTop: 16, marginBottom: 8, color: '#000' },
   text: { fontSize: 15, lineHeight: 22, marginBottom: 12, color: '#000' },
   button: { borderWidth: 1, borderColor: '#000', padding: 14, marginVertical: 6 },
+  toggleRow: { borderWidth: 2, borderColor: '#000', padding: 12, marginBottom: 12 },
+  toggleText: { fontSize: 16, fontWeight: 'bold', color: '#000', marginBottom: 6 },
   buttonText: { fontSize: 16, fontWeight: 'bold', color: '#000' },
   disabled: { opacity: 0.4 },
   overlay: { ...StyleSheet.absoluteFillObject, zIndex: 1000, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 24 },

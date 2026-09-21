@@ -18,7 +18,8 @@ export function LinkedFileMarker({ item }: {
   const paths = React.useContext(LinkedFilePathsContext);
   const kinds = React.useContext(EventDesignationsContext);
   const identity = item.recurringSeriesId || item.uid;
-  const path = paths[identity];
+  // A session's own note first, then its series notebook.
+  const path = paths[item.uid] || paths[identity];
   const kind = kinds[identity];
   const pdf = isPdfPath(path);
   return <>

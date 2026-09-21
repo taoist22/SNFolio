@@ -71,6 +71,7 @@ const DEFAULT_SETTINGS: CalendarSettings = {
   taskNotesDirectory: '/storage/emulated/0/Note/Task Notes',
   taskNoteTemplate: DEFAULT_SYSTEM_TEMPLATE,
   routeEventNotesToPara: false,
+  autoBackupEnabled: true,
   meetingParaSubpath: 'Meetings',
   classParaSubpath: 'Classes',
   eventAreaOverridesMigrated: false,
@@ -198,6 +199,16 @@ function reviveTask(raw: any): CalendarTask {
     createdAt: raw.createdAt ? new Date(raw.createdAt) : new Date(),
     caldavCollectionUrl: raw.caldavCollectionUrl || inferTaskCollectionUrl(raw.caldavUrl),
   };
+}
+
+/** See CalendarStorage.snapshotRecords. */
+export interface RecordSnapshot {
+  projects: Project[];
+  areas: Area[];
+  resources: Resource[];
+  eventTypes: EventType[];
+  membership: Record<string, ItemMembership>;
+  mappings: Record<string, MeetingNoteMapping>;
 }
 
 export class CalendarStorage {
@@ -543,6 +554,34 @@ export class CalendarStorage {
     return this.lastPersistenceError;
   }
 
+  /**
+   * The PARA records an Undo puts back: projects, areas, resources, filing,
+   * note links and event types. Records are replaced on change rather than
+   * edited in place, so shallow copies are enough.
+   */
+  snapshotRecords(): RecordSnapshot {
+    return {
+      projects: this.projects.map(item => ({ ...item })),
+      areas: this.areas.map(item => ({ ...item })),
+      resources: this.resources.map(item => ({ ...item })),
+      eventTypes: this.eventTypes.map(item => ({ ...item })),
+      membership: Object.fromEntries(Object.entries(this.membership).map(([key, value]) => [key, { ...value }])),
+      mappings: Object.fromEntries(Object.entries(this.mappings).map(([key, value]) => [key, { ...value }])),
+    };
+  }
+
+  /** Puts back records taken by snapshotRecords, for Undo. */
+  restoreRecords(snapshot: RecordSnapshot): void {
+    const copy = { ...snapshot };
+    this.projects = copy.projects.map(item => ({ ...item }));
+    this.areas = copy.areas.map(item => ({ ...item }));
+    this.resources = copy.resources.map(item => ({ ...item }));
+    this.eventTypes = copy.eventTypes.map(item => ({ ...item }));
+    this.membership = Object.fromEntries(Object.entries(copy.membership).map(([key, value]) => [key, { ...value }]));
+    this.mappings = Object.fromEntries(Object.entries(copy.mappings).map(([key, value]) => [key, { ...value }]));
+    void this.save();
+  }
+
   async exportWorkspace(): Promise<WorkspaceData> {
     if (!this.loaded || this.loadFailure || this.loading) throw new Error('A complete workspace must load successfully before backup.');
     const error = await this.flush();
@@ -677,7 +716,7 @@ export class CalendarStorage {
 
   setMapping(mapping: MeetingNoteMapping): void {
     this.mappings[mapping.eventUid] = mapping;
-    if (mapping.seriesId) {
+    if (mapping.seriesId && !mapping.perSession) {
       this.mappings[mapping.seriesId] = mapping;
     }
     void this.save();

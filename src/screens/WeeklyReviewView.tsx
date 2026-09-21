@@ -4,7 +4,7 @@ import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarTask, Project } from '../domain/types';
 import { projectDisplayLabel } from '../domain/projectLabel';
-import { projectsNeedingAttention, weeklyTaskSummary } from '../domain/plannerReview';
+import { ProjectWeek, projectsNeedingAttention, weeklyTaskSummary } from '../domain/plannerReview';
 import { projectProgress } from '../domain/taskListView';
 
 interface WeeklyReviewViewProps {
@@ -15,6 +15,9 @@ interface WeeklyReviewViewProps {
   projects: Project[];
   projectOf: (uid: string) => string | undefined;
   journalDates: Date[];
+  /** Each active project's week: what is due, scheduled, and written. */
+  projectWeeks: ProjectWeek[];
+  onOpenFile: (path: string) => void;
   weeklyNoteExists: boolean | null;
   onOpenWeeklyNote: () => void;
   onEditTask: (task: CalendarTask) => void;
@@ -35,6 +38,8 @@ export function WeeklyReviewView({
   projects,
   projectOf,
   journalDates,
+  projectWeeks,
+  onOpenFile,
   weeklyNoteExists,
   onOpenWeeklyNote,
   onEditTask,
@@ -74,6 +79,48 @@ export function WeeklyReviewView({
   </>);
   return (
     <DayPlannerSections enabled={isNomad} weekly header={header}>
+      <PlannerSection id="thisweek" title="This Week by Project" summary={`${projectWeeks.length} project(s)`}>
+      {!isNomad && (<View style={styles.sectionHeader}>
+        <Text allowFontScaling={false} style={styles.sectionHeaderText}>THIS WEEK BY PROJECT</Text>
+      </View>)}
+      {projectWeeks.length === 0 ? (
+        <Text allowFontScaling={false} style={styles.empty}>No project has tasks, events, or linked notes this week.</Text>
+      ) : projectWeeks.map(({ project, due, events, notes, week }) => (
+        <View key={project.id} style={styles.weekProject}>
+          <TouchableOpacity style={styles.weekProjectHead} onPress={() => onOpenProject(project)}>
+            <Text allowFontScaling={false} style={styles.rowTitle} numberOfLines={1}>
+              {`🚀 ${project.name}${week ? ` · Week ${week}` : ''}`}
+            </Text>
+            <Text allowFontScaling={false} style={styles.openText}>Open ›</Text>
+          </TouchableOpacity>
+          {due.map(task => (
+            <TouchableOpacity key={task.uid} style={styles.weekItem} onPress={() => onEditTask(task)}>
+              <Text allowFontScaling={false} style={styles.dateText}>
+                {`☐ ${task.dueDate?.toLocaleDateString('en-US', { weekday: 'short' }) ?? ''}`}
+              </Text>
+              <Text allowFontScaling={false} style={styles.weekItemText} numberOfLines={1}>{task.title}</Text>
+            </TouchableOpacity>
+          ))}
+          {events.slice(0, 4).map(event => (
+            <View key={`${event.uid}-${event.start.getTime()}`} style={styles.weekItem}>
+              <Text allowFontScaling={false} style={styles.dateText}>
+                {`📅 ${event.start.toLocaleDateString('en-US', { weekday: 'short' })}`}
+              </Text>
+              <Text allowFontScaling={false} style={styles.weekItemText} numberOfLines={1}>{event.summary}</Text>
+            </View>
+          ))}
+          {events.length > 4 && (
+            <Text allowFontScaling={false} style={styles.weekMore}>{`+${events.length - 4} more event(s)`}</Text>
+          )}
+          {notes.map(note => (
+            <TouchableOpacity key={note.path} style={styles.weekItem} onPress={() => onOpenFile(note.path)}>
+              <Text allowFontScaling={false} style={styles.dateText}>📝 Note</Text>
+              <Text allowFontScaling={false} style={styles.weekItemText} numberOfLines={1}>{note.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ))}
+      </PlannerSection>
       <PlannerSection id="projects" title="Project Check-In" summary={`${attention.length} project(s)`}>
       {!isNomad && (<View style={styles.sectionHeader}>
         <Text allowFontScaling={false} style={styles.sectionHeaderText}>PROJECT CHECK-IN</Text>
@@ -179,4 +226,9 @@ const styles = StyleSheet.create({
   dateText: { width: 82, fontSize: 13, color: '#000000' },
   openText: { fontSize: 12, fontWeight: 'bold', color: '#000000', marginLeft: 8 },
   empty: { fontSize: 13, color: '#404040', paddingHorizontal: 9, paddingVertical: 10 },
+  weekProject: { borderBottomWidth: 1, borderBottomColor: '#c0c0c0', paddingBottom: 6 },
+  weekProjectHead: { flexDirection: 'row', alignItems: 'center', minHeight: 44, paddingHorizontal: 9 },
+  weekItem: { flexDirection: 'row', alignItems: 'center', minHeight: 36, paddingLeft: 21, paddingRight: 9 },
+  weekItemText: { flex: 1, fontSize: 13, color: '#000000' },
+  weekMore: { fontSize: 12, color: '#404040', paddingLeft: 21, paddingVertical: 4 },
 });

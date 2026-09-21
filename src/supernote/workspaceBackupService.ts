@@ -38,6 +38,43 @@ export async function createWorkspaceBackup(store: CalendarStorage, safety = fal
   return path;
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Local calendar day, for "once a day". */
+export const localDayKey = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+/** The rotating file for a day: seven files, each replaced a week later. */
+export const autoBackupFileName = (date: Date): string => `SNFolio Auto Backup - ${WEEKDAYS[date.getDay()]}.snfolio.json`;
+
+/** Whether today's automatic backup is still due. */
+export function autoBackupDue(settings: { autoBackupEnabled?: boolean; lastAutoBackupDay?: string; restoreSyncPaused?: boolean }, now: Date): boolean {
+  return settings.autoBackupEnabled !== false && !settings.restoreSyncPaused && settings.lastAutoBackupDay !== localDayKey(now);
+}
+
+/** Writes today's automatic backup over last week's file of the same weekday, then verifies it. */
+export async function createAutoBackup(store: CalendarStorage, now = new Date()): Promise<string> {
+  await permissions(true);
+  if (!native?.writeAutoBackupFile) {
+    throw new Error('Automatic backup needs the complete SNFolio plugin package.');
+  }
+  const data = await store.exportWorkspace();
+  const imports: Record<string, string> = {};
+  for (const feed of data.settings.feeds) {
+    if (feed.localPath) imports[feed.id] = await native.readBackupFile(feed.localPath);
+  }
+  const backup: WorkspaceBackup = { format: 'snfolio-workspace', version: 1,
+    createdAt: now.toISOString(), data, imports };
+  const content = JSON.stringify(backup);
+  parseWorkspaceBackup(content);
+  let root = '/storage/emulated/0/Export';
+  try { root = await FileUtils.getExportPath() || root; } catch (_) { /* Older firmware. */ }
+  const path = await native.writeAutoBackupFile(`${root}/SNFolio Backups/${autoBackupFileName(now)}`, content);
+  const verified = await native.readBackupFile(path);
+  if (verified !== content) throw new Error('Automatic backup could not be verified.');
+  return path;
+}
+
 export async function selectWorkspaceBackup(): Promise<WorkspaceBackup | null> {
   await permissions();
   const result = await RattaFileSelector.selectFile({ selectType: 0, maxNum: 1,

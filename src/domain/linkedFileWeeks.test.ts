@@ -1,4 +1,4 @@
-import { classWeekCount, classWeekNumber, currentWeekFolderName, groupLinkedFilesByWeek, startOfWeek, weekFolderName } from './linkedFileWeeks';
+import { classWeekCount, classWeekNumber, currentWeekFolderName, isInsideFolder, linkCaption, pathKey, projectHasWeeks, startOfWeek, visibleWeekNumbers, weekFolderForDate, weekFolderName, weekFolderNumber } from './linkedFileWeeks';
 
 // Wednesday 2 September 2026; weeks start on Sunday (0) unless stated.
 const classStart = new Date(2026, 8, 2);
@@ -21,42 +21,6 @@ test('weeks keep counting across a daylight-saving change and through holiday we
   expect(classWeekNumber(day(11, 16), classStart, 0)).toBe(16);
 });
 
-test('files are grouped by week in order, with Before Week 1 first and No date last', () => {
-  const groups = groupLinkedFilesByWeek([
-    { label: 'Week 3 reading', path: '/Note/W3.note', date: day(8, 15) },
-    { label: 'Undated', path: '/Note/Todo.note' },
-    { label: 'Syllabus', path: '/Document/Syllabus.pdf', date: day(7, 25) },
-    { label: 'Week 1 notes', path: '/Note/W1.note', date: day(8, 3) },
-  ], classStart, 0);
-  expect(groups.map(group => group.title)).toEqual([
-    'Before Week 1',
-    'Week 1 · Aug 30 – Sep 5',
-    'Week 3 · Sep 13 – Sep 19',
-    'No date',
-  ]);
-});
-
-test('a shared note appears under every week it is linked from, once per week', () => {
-  const shared = { label: 'Course notebook', path: '/Note/Course.note' };
-  const groups = groupLinkedFilesByWeek([
-    { ...shared, date: day(8, 3) },
-    { ...shared, date: day(8, 4) },
-    { ...shared, date: day(8, 10) },
-  ], classStart, 0);
-  expect(groups.map(group => [group.title, group.files.length])).toEqual([
-    ['Week 1 · Aug 30 – Sep 5', 1],
-    ['Week 2 · Sep 6 – Sep 12', 1],
-  ]);
-});
-
-test('weeks without files, such as a holiday week, are not listed', () => {
-  const groups = groupLinkedFilesByWeek([
-    { label: 'Before break', path: '/Note/A.note', date: day(9, 20) },
-    { label: 'After break', path: '/Note/B.note', date: day(10, 3) },
-  ], classStart, 0);
-  expect(groups.map(group => group.key)).toEqual(['week-8', 'week-10']);
-});
-
 test('week folders are zero-padded and span the class start to its due date', () => {
   expect(weekFolderName(1)).toBe('Week 01');
   expect(weekFolderName(12)).toBe('Week 12');
@@ -72,4 +36,50 @@ test('the current week folder exists only while the class is running', () => {
   expect(currentWeekFolderName(day(8, 30), classStart, end, 0)).toBe('Week 05');
   expect(currentWeekFolderName(day(7, 20), classStart, end, 0)).toBeUndefined();
   expect(currentWeekFolderName(day(11, 28), classStart, end, 0)).toBeUndefined();
+});
+
+test('three week folders are listed outside All weeks: last, this and next week', () => {
+  // Sunday weeks from 2 September: 1 October is in Week 5 of 16.
+  expect(visibleWeekNumbers(day(9, 1), classStart, 16, 0)).toEqual([4, 5, 6]);
+  expect(visibleWeekNumbers(day(8, 3), classStart, 16, 0)).toEqual([1, 2]);
+  expect(visibleWeekNumbers(day(7, 1), classStart, 16, 0)).toEqual([1, 2]);
+  expect(visibleWeekNumbers(new Date(2027, 1, 1), classStart, 16, 0)).toEqual([15, 16]);
+  expect(visibleWeekNumbers(day(8, 3), classStart, 1, 0)).toEqual([1]);
+});
+
+test('week folder names are recognised; other folders are not', () => {
+  expect(weekFolderNumber('Week 05')).toBe(5);
+  expect(weekFolderNumber('Week 12')).toBe(12);
+  expect(weekFolderNumber('Handouts')).toBeUndefined();
+  expect(weekFolderNumber('Week 5 notes')).toBeUndefined();
+});
+
+test('paths match whether written with /sdcard or /storage/emulated/0', () => {
+  expect(pathKey('/storage/emulated/0/Note/A.note')).toBe('/Note/A.note');
+  expect(pathKey('/sdcard/Note/A.note')).toBe('/Note/A.note');
+  expect(isInsideFolder('/storage/emulated/0/Note/P/Week 01/A.note', '/sdcard/Note/P')).toBe(true);
+  expect(isInsideFolder('/Note/Project2/A.note', '/Note/P')).toBe(false);
+  expect(isInsideFolder('/Note/P', '/Note/P')).toBe(false);
+});
+
+test('a linked file names the first item it is linked from and counts the rest', () => {
+  const entries = [
+    { label: 'L.note', path: '/Note/L.note', source: 'Lecture (Sep 23)' },
+    { label: 'L.note', path: '/sdcard/Note/L.note', source: 'Task: Read chapter 4' },
+    { label: 'L.note', path: '/Note/L.note', source: 'Lecture (Sep 23)' },
+  ];
+  expect(linkCaption(entries, '/Note/L.note')).toBe('Lecture (Sep 23) +1 more');
+  expect(linkCaption(entries.slice(0, 1), '/Note/L.note')).toBe('Lecture (Sep 23)');
+  expect(linkCaption(entries, '/Note/Other.note')).toBeUndefined();
+});
+
+test('a dated item belongs in its week folder only inside the project\'s weeks', () => {
+  const project = { classStartDate: new Date(2026, 8, 2), dueDate: new Date(2026, 11, 18) };
+  expect(weekFolderForDate(project, '/Note/P/', day(8, 30))).toBe('/Note/P/Week 05');
+  expect(weekFolderForDate(project, '/Note/P', day(7, 20))).toBeUndefined();
+  expect(weekFolderForDate(project, '/Note/P', new Date(2027, 0, 10))).toBeUndefined();
+  expect(weekFolderForDate(project, '/Note/P', undefined)).toBeUndefined();
+  expect(weekFolderForDate({ classStartDate: new Date(2026, 8, 2) }, '/Note/P', day(8, 30))).toBeUndefined();
+  expect(projectHasWeeks(project)).toBe(true);
+  expect(projectHasWeeks({ dueDate: new Date() })).toBe(false);
 });

@@ -1,4 +1,5 @@
-import { CalendarTask, Project } from './types';
+import { CalendarEvent, CalendarTask, Project } from './types';
+import { classWeekCount, classWeekNumber, classWeekStartDay, LinkedFileEntry } from './linkedFileWeeks';
 import { isDone } from './taskModel';
 
 export interface WeekRange {
@@ -86,4 +87,57 @@ export function projectsNeedingAttention(
       return aDue - bDue || a.createdAt.getTime() - b.createdAt.getTime();
     })
     .slice(0, limit);
+}
+
+export interface ProjectWeek {
+  project: Project;
+  /** Open tasks due this week, soonest first. */
+  due: CalendarTask[];
+  /** Events this week, in order. */
+  events: CalendarEvent[];
+  /** Notes and PDFs linked to this week's tasks and events. */
+  notes: LinkedFileEntry[];
+  /** The project's own week number, when it has a start and due date and this week is inside them. */
+  week?: number;
+}
+
+/**
+ * This week, one project at a time: what is due, what is scheduled, and what
+ * has been written. Projects with nothing this week are left out.
+ */
+export function projectsThisWeek(
+  projects: Project[],
+  tasks: CalendarTask[],
+  events: CalendarEvent[],
+  projectOf: (uid: string) => string | undefined,
+  projectOfEvent: (event: CalendarEvent) => string | undefined,
+  notesFor: (project: Project) => LinkedFileEntry[],
+  selectedDate: Date,
+  weekStartsOn: number = 1,
+): ProjectWeek[] {
+  const range = plannerWeekRange(selectedDate, weekStartsOn);
+  return projects
+    .filter(project => project.status === 'active')
+    .map(project => {
+      const due = tasks
+        .filter(task => projectOf(task.uid) === project.id && !isDone(task) && inRange(task.dueDate, range))
+        .sort((a, b) => (a.dueDate?.getTime() ?? 0) - (b.dueDate?.getTime() ?? 0));
+      const weekEvents = events
+        .filter(event => projectOfEvent(event) === project.id && inRange(event.start, range))
+        .sort((a, b) => a.start.getTime() - b.start.getTime());
+      const seen = new Set<string>();
+      const notes = notesFor(project).filter(note => {
+        if (!inRange(note.date, range) || seen.has(note.path)) return false;
+        seen.add(note.path);
+        return true;
+      });
+      let week: number | undefined;
+      if (project.classStartDate && project.dueDate) {
+        const start = classWeekStartDay(project.classStartDate, project.classWeekStartsOn);
+        const n = classWeekNumber(selectedDate, project.classStartDate, start);
+        if (n >= 1 && n <= classWeekCount(project.classStartDate, project.dueDate, start)) week = n;
+      }
+      return { project, due, events: weekEvents, notes, week };
+    })
+    .filter(entry => entry.due.length > 0 || entry.events.length > 0 || entry.notes.length > 0);
 }

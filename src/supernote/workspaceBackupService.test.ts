@@ -3,7 +3,7 @@ import { NativeModules } from 'react-native';
 import { FileUtils, PluginManager, RattaFileSelector } from 'sn-plugin-lib';
 import { CalendarStorage } from '../storage/calendarStorage';
 import { parseWorkspaceBackup } from '../storage/workspaceBackup';
-import { createWorkspaceBackup, missingBackupNotes, restoreWorkspaceBackup, selectWorkspaceBackup } from './workspaceBackupService';
+import { autoBackupDue, autoBackupFileName, createAutoBackup, createWorkspaceBackup, localDayKey, missingBackupNotes, restoreWorkspaceBackup, selectWorkspaceBackup } from './workspaceBackupService';
 
 jest.mock('sn-plugin-lib', () => ({
   PluginManager: { hasPermission: jest.fn(async () => 1), requestPermission: jest.fn(async () => 0) },
@@ -23,6 +23,7 @@ beforeEach(async () => {
     return files.get(path);
   });
   native.writeBackupFile.mockImplementation(async (path: string, text: string) => { files.set(path, text); return path; });
+  native.writeAutoBackupFile.mockImplementation(async (path: string, text: string) => { files.set(path, text); return path; });
   native.storeImportedCalendar.mockImplementation(async (name: string, text: string) => {
     files.set(`/private/${name}`, text); return `/private/${name}`;
   });
@@ -105,4 +106,26 @@ test('missing-note preview checks links without modifying note files', async () 
   backup.data.mappings.e = { eventUid: 'e', notePath: '/storage/emulated/0/Note/missing.note' };
   expect(await missingBackupNotes(backup)).toEqual(['/storage/emulated/0/Note/missing.note']);
   expect(FileUtils.exists).toHaveBeenCalledWith('/storage/emulated/0/Note/missing.note');
+});
+
+test('automatic backups rotate through seven weekday files and are due once a day while switched on', async () => {
+  const monday = new Date(2026, 8, 21, 9);
+  expect(autoBackupFileName(monday)).toBe('SNFolio Auto Backup - Mon.snfolio.json');
+  expect(autoBackupFileName(new Date(2026, 8, 27, 9))).toBe('SNFolio Auto Backup - Sun.snfolio.json');
+  expect(localDayKey(monday)).toBe('2026-09-21');
+  expect(autoBackupDue({}, monday)).toBe(true);
+  expect(autoBackupDue({ autoBackupEnabled: false }, monday)).toBe(false);
+  expect(autoBackupDue({ lastAutoBackupDay: '2026-09-21' }, monday)).toBe(false);
+  expect(autoBackupDue({ lastAutoBackupDay: '2026-09-20' }, monday)).toBe(true);
+  expect(autoBackupDue({ restoreSyncPaused: true }, monday)).toBe(false);
+
+  const store = await storeWithImport();
+  const path = await createAutoBackup(store, monday);
+  expect(path).toBe('/storage/emulated/0/Export/SNFolio Backups/SNFolio Auto Backup - Mon.snfolio.json');
+  expect(native.writeBackupFile).not.toHaveBeenCalled();
+  expect(parseWorkspaceBackup(files.get(path) as string).data.tasks.map((task: any) => task.uid)).toEqual(['keep']);
+  // A week later the same file is replaced.
+  store.upsertTask({ uid: 'new', title: 'New', completed: false, createdAt: new Date() });
+  await createAutoBackup(store, new Date(2026, 8, 28, 9));
+  expect(parseWorkspaceBackup(files.get(path) as string).data.tasks.map((task: any) => task.uid).sort()).toEqual(['keep', 'new']);
 });

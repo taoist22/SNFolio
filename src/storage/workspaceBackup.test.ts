@@ -163,6 +163,15 @@ test('a class start date and weekly grouping survive backup and restore, and bad
   expect(() => parseWorkspaceBackup(JSON.stringify(bad))).toThrow('project linked-file grouping');
   bad.data.projects = [{ id: 'p', name: 'Project', status: 'active', createdAt: new Date().toISOString(), classWeekStartsOn: 7 }];
   expect(() => parseWorkspaceBackup(JSON.stringify(bad))).toThrow('project class week start');
+  bad.data.projects = [{ id: 'p', name: 'Project', status: 'active', createdAt: new Date().toISOString(), recurringNotes: 'weekly' }];
+  expect(() => parseWorkspaceBackup(JSON.stringify(bad))).toThrow('project recurring notes');
+  bad.data.projects = [{ id: 'p', name: 'Project', status: 'active', createdAt: new Date().toISOString(), recurringNotes: 'session', autoFileMatch: 'IDS105, Acme' }];
+  expect(() => parseWorkspaceBackup(JSON.stringify(bad))).not.toThrow();
+  bad.data.mappings = { s: { eventUid: 's', seriesId: 'lec', notePath: '/N/S.note', perSession: true, eventStartIso: 'not a date' } };
+  expect(() => parseWorkspaceBackup(JSON.stringify(bad))).toThrow('note mapping session date');
+  bad.data.settings = { ...bad.data.settings, autoBackupEnabled: 'yes' };
+  bad.data.mappings = {};
+  expect(() => parseWorkspaceBackup(JSON.stringify(bad))).toThrow('autoBackupEnabled');
 });
 
 test('backup rejects unknown project categories and event designations', async () => {

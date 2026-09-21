@@ -59,7 +59,7 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
   // Older installations retain removed settings because load merges saved data
   // over defaults. Keep their original types valid without reviving the features.
   const booleans = ['hideAllDayEvents', 'hideSoloEvents', 'caldavEnabled', 'taskCaldavEnabled',
-    'taskCaldavLocalEnrollmentDone', 'pushTasksAsEvents', 'routeEventNotesToPara', 'eventAreaOverridesMigrated', 'restoreSyncPaused', 'floatingLauncherEnabled'];
+    'taskCaldavLocalEnrollmentDone', 'pushTasksAsEvents', 'routeEventNotesToPara', 'eventAreaOverridesMigrated', 'restoreSyncPaused', 'floatingLauncherEnabled', 'autoBackupEnabled'];
   const numbers = ['scheduleStartHour', 'scheduleEndHour', 'weekStartsOn', 'calendarWeekLength'];
   for (const [key, value] of Object.entries(settings)) {
     if (key === 'feeds') continue;
@@ -114,6 +114,8 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
         if (item.category !== undefined) requireValid(['general', 'class', 'work'].includes(item.category), 'project category');
         if (item.defaultEventDesignation !== undefined) requireValid(['none', 'class', 'meeting'].includes(item.defaultEventDesignation), 'project default calendar designation');
         if (item.linkedFilesGrouping !== undefined) requireValid(['none', 'week'].includes(item.linkedFilesGrouping), 'project linked-file grouping');
+        if (item.recurringNotes !== undefined) requireValid(['series', 'session'].includes(item.recurringNotes), 'project recurring notes');
+        if (item.autoFileMatch !== undefined) requireValid(typeof item.autoFileMatch === 'string', 'project auto-file words');
         if (item.classWeekStartsOn !== undefined) requireValid(Number.isInteger(item.classWeekStartsOn) && item.classWeekStartsOn >= 0 && item.classWeekStartsOn <= 6, 'project class week start');
       }
     }
@@ -121,6 +123,8 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
   for (const field of ['mappings', 'eventKinds', 'itemMembership']) requireValid(object(data[field]), field);
   for (const mapping of Object.values(data.mappings) as any[]) {
     requireValid(object(mapping) && typeof mapping.eventUid === 'string' && typeof mapping.notePath === 'string', 'note mapping');
+    if (mapping.perSession !== undefined) requireValid(typeof mapping.perSession === 'boolean', 'note mapping session flag');
+    if (mapping.eventStartIso !== undefined) requireValid(typeof mapping.eventStartIso === 'string' && !Number.isNaN(Date.parse(mapping.eventStartIso)), 'note mapping session date');
   }
   requireValid(Object.values(data.eventKinds).every(kind => kind === 'meeting' || kind === 'class' || kind === 'daily'), 'note kinds');
   for (const entry of Object.values(data.itemMembership)) {
