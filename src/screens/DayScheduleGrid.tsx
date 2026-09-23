@@ -28,7 +28,7 @@ interface DayScheduleGridProps {
  * Positioning lives in domain/dayGrid so the clamping and overlap columns are
  * tested off device.
  */
-export function DayScheduleGrid({
+function DayScheduleGridInner({
   events,
   startHour,
   endHour,
@@ -151,6 +151,13 @@ const GUTTER = 62;
  */
 const ACTIONS_MIN_HEIGHT = 46;
 const META_MIN_HEIGHT = 66;
+
+/**
+ * Changing day re-rendered this five or six times — the day's events, the note
+ * sweep and the journal check all arrive separately — at roughly 400 ms each
+ * on device with a busy calendar. Its inputs settle after the first of those.
+ */
+export const DayScheduleGrid = React.memo(DayScheduleGridInner);
 
 const styles = StyleSheet.create({
   allDayRow: {

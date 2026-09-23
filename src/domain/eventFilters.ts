@@ -10,6 +10,18 @@ function feedFingerprint(event: CalendarEvent): string {
   ].join('|');
 }
 
+/**
+ * The same job as feedFingerprint, for comparing one batch against itself.
+ *
+ * toLocaleLowerCase is noticeably slower on the device, and this value is
+ * never stored: it only has to be consistent within a single call. The stored
+ * hide identity above keeps the locale-aware form so that ids saved by earlier
+ * versions still match.
+ */
+function sessionFingerprint(event: CalendarEvent): string {
+  return `${event.summary.trim().toLowerCase()}|${event.start.getTime()}|${event.end.getTime()}|${event.allDay ? '1' : '0'}|${(event.location || '').trim().toLowerCase()}`;
+}
+
 /** Stable across duplicate subscribed calendars and recurring occurrences. */
 export function feedEventHideIdentity(event: CalendarEvent): string {
   return event.recurringSeriesId
@@ -48,7 +60,7 @@ export function dedupeEvents(events: CalendarEvent[]): CalendarEvent[] {
     // with different UIDs. Collapse only byte-for-byte-equivalent feed views;
     // local and CalDAV events are never merged by a heuristic.
     if (event.sourceKind === 'feed') {
-      const fingerprint = feedFingerprint(event);
+      const fingerprint = sessionFingerprint(event);
       if (seenFeedFingerprints.has(fingerprint)) continue;
       seenFeedFingerprints.add(fingerprint);
     }

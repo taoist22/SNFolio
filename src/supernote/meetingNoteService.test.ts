@@ -348,3 +348,19 @@ describe('recurring series identity', () => {
     expect(calendarStorage.getEventKind('standalone')).toBe('meeting');
   });
 });
+
+test('the device\'s API refusal (a PDF is open) is explained instead of passed through', async () => {
+  const { noteCreationError } = jest.requireActual('./meetingNoteService');
+  expect(noteCreationError('This app is not allowed to use this API. Please call a different API.'))
+    .toBe('The device does not allow notes to be created or added to while a PDF is open. Close the PDF, open a note, then try again.');
+  expect(noteCreationError('The device rejected template style_8mm_ruled_line.'))
+    .toBe('The device rejected template style_8mm_ruled_line.');
+
+  (PluginFileAPI.createNote as jest.Mock).mockClear()
+    .mockResolvedValueOnce({ success: false, error: { message: 'This app is not allowed to use this API. Please call a different API.' } })
+    .mockResolvedValue({ success: false, error: { message: 'This app is not allowed to use this API. Please call a different API.' } });
+  const res = await meetingNoteService.createDailyNote('/storage/emulated/0/Note/Daily/2026-09-22.note', calendarStorage.getSettings());
+  expect(res.success).toBe(false);
+  expect(res.error).toContain('Close the PDF, open a note');
+  (PluginFileAPI.createNote as jest.Mock).mockResolvedValue({ success: true, result: true });
+});

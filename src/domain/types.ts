@@ -378,6 +378,8 @@ export interface CalendarSettings {
   routeEventNotesToPara?: boolean;
   /** PARA project cards the user collapsed to one line. */
   collapsedProjectCards?: string[];
+  /** Diagnostic: show how long each screen takes to build and draw. */
+  showScreenTimings?: boolean;
   /** Save a workspace backup once a day when SNFolio opens (Mon … Sun files, each overwritten a week later). */
   autoBackupEnabled?: boolean;
   /** Local date (YYYY-MM-DD) of the last automatic backup. */

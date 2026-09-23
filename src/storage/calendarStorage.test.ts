@@ -964,3 +964,25 @@ describe('per-session notes and undo records', () => {
     expect(before.projects[0].name).toBe('IDS105');
   });
 });
+
+describe('clearing synced calendar data', () => {
+  test('removeSyncedEvents empties the cache and the sync record, leaving everything else', async () => {
+    const store = new CalendarStorage();
+    await store.load();
+    store.setCaldavEvents([
+      { uid: 'a', summary: 'A', start: new Date(2026, 8, 1), end: new Date(2026, 8, 1, 1), allDay: false, attendees: [], sourceKind: 'caldav' },
+      { uid: 'b', summary: 'B', start: new Date(2026, 8, 2), end: new Date(2026, 8, 2, 1), allDay: false, attendees: [], sourceKind: 'caldav' },
+    ]);
+    store.addUserEvent({ uid: 'mine', summary: 'Mine', start: new Date(2026, 8, 3), end: new Date(2026, 8, 3, 1), allDay: false, attendees: [] });
+    store.upsertTask({ uid: 'task', title: 'Task', completed: false, createdAt: new Date() });
+    store.upsertProject({ id: 'p', name: 'Project', status: 'active', createdAt: new Date() });
+
+    expect(store.removeSyncedEvents()).toBe(2);
+    expect(store.getCaldavEvents()).toEqual([]);
+    expect(store.getUserEvents().map(event => event.uid)).toEqual(['mine']);
+    expect(store.getTasks()).toHaveLength(1);
+    expect(store.getProjects()).toHaveLength(1);
+    // Nothing cached means nothing to remove the second time.
+    expect(store.removeSyncedEvents()).toBe(0);
+  });
+});

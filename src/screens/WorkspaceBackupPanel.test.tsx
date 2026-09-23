@@ -3,13 +3,16 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { TouchableOpacity, Text, Modal } from 'react-native';
 import { calendarStorage } from '../storage/calendarStorage';
 import { WorkspaceBackupPanel } from './WorkspaceBackupPanel';
-import { selectWorkspaceBackup, restoreWorkspaceBackup, createWorkspaceBackup } from '../supernote/workspaceBackupService';
+import { selectWorkspaceBackup, restoreWorkspaceBackup, createWorkspaceBackup, listWorkspaceBackups, readWorkspaceBackup } from '../supernote/workspaceBackupService';
 
 jest.mock('../supernote/workspaceBackupService', () => ({
   selectWorkspaceBackup: jest.fn(),
+  listWorkspaceBackups: jest.fn(async () => []),
+  readWorkspaceBackup: jest.fn(),
   missingBackupNotes: jest.fn(async () => []),
   createWorkspaceBackup: jest.fn(async () => '/Export/backup.snfolio.json'),
   restoreWorkspaceBackup: jest.fn(async () => '/Export/safety.snfolio.json'),
+  resetWorkspace: jest.fn(async () => '/Export/before-reset.snfolio.json'),
 }));
 const selected = { createdAt: '2026-09-01T00:00:00Z', imports: {}, data: {
   tasks: [], userEvents: [], caldavEvents: [], areas: [], projects: [], resources: [], pendingTaskDeletes: [],
@@ -19,12 +22,22 @@ function button(tree: TestRenderer.ReactTestRenderer, label: string) {
     node.findAllByType(Text).some(text => text.props.children === label))!;
 }
 
-test('selecting a backup only previews; replacement requires the explicit confirmation', async () => {
-  (selectWorkspaceBackup as jest.Mock).mockResolvedValueOnce(selected);
+test('saved backups are listed, newest first; choosing one only previews it', async () => {
+  (listWorkspaceBackups as jest.Mock).mockResolvedValueOnce([
+    { path: '/Export/SNFolio Backups/workspace-2026-09-22.snfolio.json', name: 'workspace-2026-09-22.snfolio.json', modified: Date.parse('2026-09-22T08:00:00Z'), size: 4096 },
+    { path: '/Export/SNFolio Backups/SNFolio Auto Backup - Mon.snfolio.json', name: 'SNFolio Auto Backup - Mon.snfolio.json', modified: Date.parse('2026-09-21T08:00:00Z') },
+  ]);
+  (readWorkspaceBackup as jest.Mock).mockResolvedValueOnce(selected);
   const restored = jest.fn();
   let tree!: TestRenderer.ReactTestRenderer;
   act(() => { tree = TestRenderer.create(<WorkspaceBackupPanel disabled={false} onRestored={restored} />); });
   await act(async () => { button(tree, 'Choose Backup to Restore…').props.onPress(); });
+  // The system picker is not used for SNFolio's own folder: it warns about Export.
+  expect(selectWorkspaceBackup).not.toHaveBeenCalled();
+  expect(button(tree, 'workspace-2026-09-22')).toBeTruthy();
+  expect(button(tree, 'SNFolio Auto Backup - Mon')).toBeTruthy();
+  await act(async () => { button(tree, 'workspace-2026-09-22').props.onPress(); });
+  expect(readWorkspaceBackup).toHaveBeenCalledWith('/Export/SNFolio Backups/workspace-2026-09-22.snfolio.json');
   expect(restoreWorkspaceBackup).not.toHaveBeenCalled();
   await act(async () => { button(tree, 'Create Safety Backup and Replace Workspace').props.onPress(); });
   expect(restoreWorkspaceBackup).toHaveBeenCalledTimes(1);
@@ -61,15 +74,15 @@ test('pending file permission uses no native modal and denial returns usable con
   loaded.mockRestore();
 });
 
-test('the native picker can remain pending without a backup modal above it', async () => {
-  let finish!: (value: null) => void;
-  (selectWorkspaceBackup as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+test('listing can remain pending without a backup modal above it', async () => {
+  let finish!: (value: never[]) => void;
+  (listWorkspaceBackups as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   let tree!: TestRenderer.ReactTestRenderer;
   act(() => { tree = TestRenderer.create(<WorkspaceBackupPanel disabled={false} onRestored={() => {}} />); });
   await act(async () => { button(tree, 'Choose Backup to Restore…').props.onPress(); });
   expect(tree.root.findAllByType(Modal)).toHaveLength(0);
   expect(button(tree, 'Choose Backup to Restore…').props.disabled).toBe(true);
-  await act(async () => { finish(null); });
+  await act(async () => { finish([]); });
   expect(button(tree, 'Close').props.disabled).toBe(false);
   act(() => tree.unmount());
 });

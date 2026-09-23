@@ -1,5 +1,5 @@
 import { CalendarEvent } from './types';
-import { expandEventsForDate } from './icsParser';
+import { eventsOnDay, expandEventsByDay } from './icsParser';
 
 export interface MonthGridCell {
   date: Date;
@@ -8,6 +8,39 @@ export interface MonthGridCell {
   isToday: boolean;
   eventCount: number;
   events: CalendarEvent[];
+}
+
+/**
+ * Grids already built for one array of events.
+ *
+ * Paging back to a month meant building it again, which measured 560–1,050 ms
+ * on device for a busy calendar. A new array of events (any sync, edit or
+ * filter change) drops the whole cache with it.
+ */
+const gridCache = new WeakMap<CalendarEvent[], Map<string, MonthGridCell[][]>>();
+const MAX_CACHED_MONTHS = 12;
+
+/** generateMonthGrid, reusing a month already built for the same events. */
+export function monthGridFor(
+  year: number,
+  month: number,
+  allEvents: CalendarEvent[],
+  today = new Date(),
+  weekStartsOn: number = 0,
+): MonthGridCell[][] {
+  let months = gridCache.get(allEvents);
+  if (!months) {
+    months = new Map();
+    gridCache.set(allEvents, months);
+  }
+  // Today's date is part of the key: a grid built yesterday marks the wrong cell.
+  const key = `${year}|${month}|${weekStartsOn}|${today.getFullYear()}-${today.getMonth()}-${today.getDate()}`;
+  const cached = months.get(key);
+  if (cached) return cached;
+  const grid = generateMonthGrid(year, month, allEvents, today, weekStartsOn);
+  months.set(key, grid);
+  if (months.size > MAX_CACHED_MONTHS) months.delete(months.keys().next().value as string);
+  return grid;
 }
 
 export function generateMonthGrid(
@@ -29,6 +62,12 @@ export function generateMonthGrid(
   const todayMonth = today.getMonth();
   const todayDate = today.getDate();
 
+  // One pass over the events for the whole grid: asking each of the 42 cells
+  // separately visited every event 42 times, which dominated a busy calendar.
+  const lastCell = new Date(currentPointer);
+  lastCell.setDate(lastCell.getDate() + 41);
+  const byDay = expandEventsByDay(allEvents, currentPointer, lastCell);
+
   for (let week = 0; week < 6; week++) {
     const weekRow: MonthGridCell[] = [];
     for (let day = 0; day < 7; day++) {
@@ -39,7 +78,7 @@ export function generateMonthGrid(
         cellDate.getMonth() === todayMonth &&
         cellDate.getDate() === todayDate;
 
-      const dayEvents = expandEventsForDate(allEvents, cellDate);
+      const dayEvents = eventsOnDay(byDay, cellDate);
 
       weekRow.push({
         date: cellDate,

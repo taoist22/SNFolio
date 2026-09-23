@@ -94,6 +94,11 @@ const DEFAULT_SETTINGS: CalendarSettings = {
  * the same `feeds` array — and addFeed() pushes into it, mutating the defaults
  * themselves. Hand out a fresh copy instead.
  */
+/** A fresh set of settings, for Reset. */
+export function defaultCalendarSettings(): CalendarSettings {
+  return makeDefaultSettings();
+}
+
 function makeDefaultSettings(): CalendarSettings {
   return {
     ...DEFAULT_SETTINGS,
@@ -1039,6 +1044,21 @@ export class CalendarStorage {
       );
     }
     void this.save();
+  }
+
+  /**
+   * Empties the cached CalDAV events and the record of what the server held,
+   * for a sync that brought back more than the device can work with. Events
+   * created on the device, tasks, PARA and notes are untouched, and the
+   * account itself is left alone so it can be reconnected or removed.
+   */
+  removeSyncedEvents(): number {
+    const removed = this.caldavEvents.length;
+    if (!removed) return 0;
+    this.caldavEvents = [];
+    this.pushState = emptyPushState();
+    void this.save();
+    return removed;
   }
 
   /**

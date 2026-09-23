@@ -600,6 +600,91 @@ function overlapsRange(start: Date, end: Date, rangeStart: Date, rangeEnd: Date)
 }
 
 /**
+ * Occurrences already worked out for one recurring event, and the window they
+ * cover.
+ *
+ * Drawing a month asked every recurring event about each day in turn, and
+ * answering walks the rule forward from its start date, so the work grew with
+ * recurring events × days shown × the event's age. Measured before this cache:
+ * 500 weekly events cost ~355 ms per month on a developer machine, and 10,000
+ * cost ~5 s — far worse than 10,000 one-off events (~19 ms).
+ *
+ * Keyed by the event object: parsing and syncing build new objects, so an
+ * edited event never reuses an old expansion.
+ */
+const expansionCache = new WeakMap<CalendarEvent, { start: number; end: number; instances: CalendarEvent[] }>();
+
+/** Occurrences of one recurring event on one day, expanding a wider window once. */
+function cachedRruleInstances(event: CalendarEvent, startOfDay: Date, endOfDay: Date): CalendarEvent[] {
+  const cached = expansionCache.get(event);
+  const withinCache = cached && startOfDay.getTime() >= cached.start && endOfDay.getTime() <= cached.end;
+  if (!withinCache) {
+    // The month around the requested day, so paging a month or a week reuses one expansion.
+    const windowStart = new Date(startOfDay.getFullYear(), startOfDay.getMonth() - 1, 1);
+    const windowEnd = new Date(startOfDay.getFullYear(), startOfDay.getMonth() + 2, 0, 23, 59, 59);
+    expansionCache.set(event, {
+      start: windowStart.getTime(),
+      end: windowEnd.getTime(),
+      instances: expandRruleInstances(event, windowStart, windowEnd),
+    });
+  }
+  const window = expansionCache.get(event) as { instances: CalendarEvent[] };
+  return window.instances.filter(instance => overlapsRange(instance.start, instance.end, startOfDay, endOfDay));
+}
+
+const dayKey = (date: Date): string => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+
+/**
+ * Every day in a range at once, as day key → events.
+ *
+ * Drawing a month used to call expandEventsForDate for each of its 42 cells,
+ * so every event was visited 42 times; on a busy calendar that is tens of
+ * thousands of visits per redraw. Here each event is examined once and its
+ * occurrences are filed under the days they touch.
+ */
+export function expandEventsByDay(
+  events: CalendarEvent[],
+  rangeStart: Date,
+  rangeEndInclusive: Date,
+): Map<string, CalendarEvent[]> {
+  const days = new Map<string, CalendarEvent[]>();
+  const start = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), rangeStart.getDate());
+  const end = new Date(rangeEndInclusive.getFullYear(), rangeEndInclusive.getMonth(), rangeEndInclusive.getDate(), 23, 59, 59);
+  for (let day = new Date(start); day <= end; day.setDate(day.getDate() + 1)) {
+    days.set(dayKey(day), []);
+  }
+
+  const file = (instance: CalendarEvent) => {
+    // Overnight and multi-day events belong to every day they cover.
+    const from = instance.start < start ? start : instance.start;
+    const until = instance.end > end ? end : instance.end;
+    const cursor = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    while (cursor <= until) {
+      const bucket = days.get(dayKey(cursor));
+      if (bucket && !(instance.end.getTime() !== instance.start.getTime() && instance.end.getTime() === cursor.getTime())) {
+        bucket.push(instance);
+      }
+      cursor.setDate(cursor.getDate() + 1);
+    }
+  };
+
+  for (const event of events) {
+    if (!event.rrule || event.recurrenceError) {
+      if (overlapsRange(event.start, event.end, start, end)) file(event);
+    } else {
+      for (const instance of expandRruleInstances(event, start, end)) file(instance);
+    }
+  }
+
+  for (const bucket of days.values()) bucket.sort((a, b) => a.start.getTime() - b.start.getTime());
+  return days;
+}
+
+/** The events of one day from a map built by expandEventsByDay. */
+export const eventsOnDay = (days: Map<string, CalendarEvent[]>, date: Date): CalendarEvent[] =>
+  days.get(dayKey(date)) || [];
+
+/**
  * Expands recurring events for a specific target day (or range)
  */
 export function expandEventsForDate(events: CalendarEvent[], targetDate: Date): CalendarEvent[] {
@@ -624,8 +709,7 @@ export function expandEventsForDate(events: CalendarEvent[], targetDate: Date): 
       // zoned event and an identical zoned recurring event therefore appear on
       // the same device-local day even when that day differs from the day in
       // the event's source zone.
-      const expandedInstances = expandRruleInstances(event, startOfDay, endOfDay);
-      result.push(...expandedInstances);
+      result.push(...cachedRruleInstances(event, startOfDay, endOfDay));
     }
   }
 
@@ -693,8 +777,20 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
   // every period consumes exactly one COUNT occurrence; other COUNT rules are
   // enumerated from the beginning within the validated scan horizon.
   let generated = 0;
-  const countCanFastForward = freq === 'DAILY' && byDays.length === 0 &&
-    event.recurrenceValueType === 'utc';
+  // A rule that produces exactly one occurrence in every period, and can never
+  // skip a period, lets COUNT be honoured by arithmetic: the periods skipped
+  // are the occurrences consumed. Weekly COUNT rules are common in real
+  // calendars (Canvas, Brightspace, iCloud), and enumerating them from DTSTART
+  // measured 777–1020 ms per month view on a Nomad with ~300 such series.
+  // Day 29–31 monthly and February 29 yearly rules are excluded: they skip
+  // periods that have no such date, so counting periods would overcount.
+  const onePerPeriod = byDays.length === 0 && (
+    freq === 'WEEKLY' ||
+    (freq === 'MONTHLY' && byMonthDays.length === 0 && original.day <= 28) ||
+    (freq === 'YEARLY' && !(original.month === 1 && original.day === 29))
+  );
+  const countCanFastForward = onePerPeriod ||
+    (freq === 'DAILY' && byDays.length === 0 && event.recurrenceValueType === 'utc');
   if (count === 0 || countCanFastForward) {
     const earliest = new Date(rangeStart.getTime() - Math.max(0, durationMs));
     // One day of slack absorbs the offset between a UTC day cursor and the
@@ -718,6 +814,7 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
         if (periods > 0) {
           cur.setTime(startWeekStart.getTime() + periods * interval * 7 * dayMs);
           if (cur < startDay) cur.setTime(startDay.getTime());
+          if (count > 0) generated = periods;
         }
       } else if (freq === 'MONTHLY') {
         const monthsGap =
@@ -727,12 +824,14 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
         if (periods > 0) {
           cur.setTime(Date.UTC(original.year, original.month + periods * interval, 1));
           if (cur < startDay) cur.setTime(startDay.getTime());
+          if (count > 0) generated = periods;
         }
       } else if (freq === 'YEARLY') {
         const periods = Math.floor((targetDay.getUTCFullYear() - original.year) / interval);
         if (periods > 0) {
           cur.setTime(Date.UTC(original.year + periods * interval, original.month, 1));
           if (cur < startDay) cur.setTime(startDay.getTime());
+          if (count > 0) generated = periods;
         }
       }
     }
@@ -822,7 +921,14 @@ function expandRruleInstances(event: CalendarEvent, rangeStart: Date, rangeEnd: 
     if (count > 0 && generated >= count) break;
 
     if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(freq)) break;
-    cur.setUTCDate(cur.getUTCDate() + 1);
+    // A weekly rule without BYDAY recurs on DTSTART's weekday only, so once
+    // the cursor is on an occurrence the next one is exactly INTERVAL weeks
+    // later. Checking the six days between them is wasted work: with ~300
+    // such series a month view walked about 13,000 days instead of 2,000.
+    const stride = matches && candidateIsValid && freq === 'WEEKLY' && byDays.length === 0
+      ? 7 * interval
+      : 1;
+    cur.setUTCDate(cur.getUTCDate() + stride);
   }
 
   return instances;

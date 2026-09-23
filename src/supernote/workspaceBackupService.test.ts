@@ -3,7 +3,7 @@ import { NativeModules } from 'react-native';
 import { FileUtils, PluginManager, RattaFileSelector } from 'sn-plugin-lib';
 import { CalendarStorage } from '../storage/calendarStorage';
 import { parseWorkspaceBackup } from '../storage/workspaceBackup';
-import { autoBackupDue, autoBackupFileName, createAutoBackup, createWorkspaceBackup, localDayKey, missingBackupNotes, restoreWorkspaceBackup, selectWorkspaceBackup } from './workspaceBackupService';
+import { listWorkspaceBackups, resetWorkspace, autoBackupDue, autoBackupFileName, createAutoBackup, createWorkspaceBackup, localDayKey, missingBackupNotes, restoreWorkspaceBackup, selectWorkspaceBackup } from './workspaceBackupService';
 
 jest.mock('sn-plugin-lib', () => ({
   PluginManager: { hasPermission: jest.fn(async () => 1), requestPermission: jest.fn(async () => 0) },
@@ -128,4 +128,52 @@ test('automatic backups rotate through seven weekday files and are due once a da
   store.upsertTask({ uid: 'new', title: 'New', completed: false, createdAt: new Date() });
   await createAutoBackup(store, new Date(2026, 8, 28, 9));
   expect(parseWorkspaceBackup(files.get(path) as string).data.tasks.map((task: any) => task.uid).sort()).toEqual(['keep', 'new']);
+});
+
+test('reset backs the workspace up first, then empties SNFolio', async () => {
+  const store = await storeWithImport();
+  store.upsertProject({ id: 'p', name: 'IDS105', status: 'active', createdAt: new Date() });
+  store.setCaldavEvents([{ uid: 'synced', summary: 'Synced', start: new Date(), end: new Date(), allDay: false, attendees: [], sourceKind: 'caldav' }]);
+  await store.flush();
+
+  const path = await resetWorkspace(store, { feeds: [], notesDirectory: '/storage/emulated/0/Note/Meetings' } as any);
+
+  // The backup holds what SNFolio had, so a reset by mistake is recoverable.
+  const saved = parseWorkspaceBackup(files.get(path) as string);
+  expect(saved.data.tasks.map((task: any) => task.uid)).toEqual(['keep']);
+  expect(saved.data.projects).toHaveLength(1);
+  // …and the workspace is empty afterwards.
+  expect(store.getTasks()).toEqual([]);
+  expect(store.getProjects()).toEqual([]);
+  expect(store.getCaldavEvents()).toEqual([]);
+  expect(store.getSettings().feeds).toEqual([]);
+  // A restore pauses syncing for review; a reset has nothing to review, so an
+  // account can be connected straight away.
+  expect(store.getSettings().restoreSyncPaused).toBe(false);
+});
+
+test('a restored backup still pauses syncing, unlike a reset', async () => {
+  const store = await storeWithImport();
+  const path = await createWorkspaceBackup(store);
+  const backup = parseWorkspaceBackup(files.get(path) as string);
+  await restoreWorkspaceBackup(store, backup, () => {});
+  expect(store.getSettings().restoreSyncPaused).toBe(true);
+});
+
+test('backups are listed from Export through the plugin\'s own module, newest first', async () => {
+  const folder = '/storage/emulated/0/Export/SNFolio Backups';
+  native.listFolderEntries = jest.fn(async () => [
+    { name: 'SNFolio Auto Backup - Mon.snfolio.json', path: `${folder}/SNFolio Auto Backup - Mon.snfolio.json`, isFolder: false, modified: 1000, size: 2048 },
+    { name: 'workspace-2026-09-22.snfolio.json', path: `${folder}/workspace-2026-09-22.snfolio.json`, isFolder: false, modified: 5000, size: 4096 },
+    { name: 'notes.txt', path: `${folder}/notes.txt`, isFolder: false, modified: 9000 },
+    { name: 'Old', path: `${folder}/Old`, isFolder: true, modified: 9000 },
+  ]);
+  const files = await listWorkspaceBackups();
+  expect(files.map(file => file.name)).toEqual(['workspace-2026-09-22.snfolio.json', 'SNFolio Auto Backup - Mon.snfolio.json']);
+  expect(files[0]).toMatchObject({ path: `${folder}/workspace-2026-09-22.snfolio.json`, modified: 5000, size: 4096 });
+  // The system file picker is never involved: it refuses paths outside the plugin whitelist.
+  expect(RattaFileSelector.selectFile).not.toHaveBeenCalled();
+
+  native.listFolderEntries = jest.fn(async () => { throw new Error('No such folder'); });
+  expect(await listWorkspaceBackups()).toEqual([]);
 });

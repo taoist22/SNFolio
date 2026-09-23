@@ -4,7 +4,9 @@ import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { allocateCellRows, generateMonthGrid, MonthGridCell } from '../domain/monthGrid';
+import { timePerf } from '../domain/perfTrace';
+import { usePaintTiming } from './PerfReadout';
+import { allocateCellRows, monthGridFor, MonthGridCell } from '../domain/monthGrid';
 import { CalendarEvent, CalendarTask } from '../domain/types';
 import { tasksForCalendarDay } from '../domain/taskFilters';
 import { dateKey } from '../domain/dailyNote';
@@ -70,7 +72,7 @@ function cellNoteBadges(
   return [...badges];
 }
 
-export function MonthGridView({
+function MonthGridViewInner({
   currentDate,
   selectedDate,
   allEvents,
@@ -99,7 +101,17 @@ export function MonthGridView({
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
-  const grid = generateMonthGrid(year, month, allEvents, new Date(), weekStartsOn);
+  // Rebuilding this on every render cost hundreds of milliseconds on device
+  // for a busy calendar, however unrelated the render was.
+  const grid = React.useMemo(
+    () => timePerf(
+      'month build',
+      () => monthGridFor(year, month, allEvents, new Date(), weekStartsOn),
+      () => `${allEvents.length} events`,
+    ),
+    [year, month, allEvents, weekStartsOn],
+  );
+  usePaintTiming('month draw', () => `${grid.reduce((total, week) => total + week.reduce((row, cell) => row + cell.events.length, 0), 0)} shown`);
   const orderedDayNames = Array.from({ length: 7 }, (_, offset) =>
     DAY_NAMES[(weekStartsOn + offset) % 7]
   );
@@ -241,6 +253,14 @@ export function MonthGridView({
     </View>
   );
 }
+
+/**
+ * The grid re-rendered whenever anything else on the panel changed — a status
+ * message, the day's events, the note sweep — and each redraw cost roughly a
+ * quarter of a second on device with a busy calendar. Its inputs are stable,
+ * so compare them instead.
+ */
+export const MonthGridView = React.memo(MonthGridViewInner);
 
 const styles = StyleSheet.create({
   container: {

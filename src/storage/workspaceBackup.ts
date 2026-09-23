@@ -60,7 +60,7 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
   // Older installations retain removed settings because load merges saved data
   // over defaults. Keep their original types valid without reviving the features.
   const booleans = ['hideAllDayEvents', 'hideSoloEvents', 'caldavEnabled', 'taskCaldavEnabled',
-    'taskCaldavLocalEnrollmentDone', 'pushTasksAsEvents', 'routeEventNotesToPara', 'eventAreaOverridesMigrated', 'restoreSyncPaused', 'floatingLauncherEnabled', 'autoBackupEnabled'];
+    'taskCaldavLocalEnrollmentDone', 'pushTasksAsEvents', 'routeEventNotesToPara', 'eventAreaOverridesMigrated', 'restoreSyncPaused', 'floatingLauncherEnabled', 'autoBackupEnabled', 'showScreenTimings'];
   const numbers = ['scheduleStartHour', 'scheduleEndHour', 'weekStartsOn', 'calendarWeekLength'];
   for (const [key, value] of Object.entries(settings)) {
     if (key === 'feeds') continue;
@@ -138,6 +138,22 @@ export function validateWorkspaceData(data: any): asserts data is WorkspaceData 
   requireValid(Array.isArray(data.pendingTaskDeletes) && data.pendingTaskDeletes.every((entry: any) =>
     object(entry) && typeof entry.uid === 'string' && typeof entry.collectionUrl === 'string' &&
     Object.values(entry).every(value => typeof value === 'string')), 'queued task deletions');
+}
+
+/**
+ * A workspace with nothing in it, for Reset. Settings come from the caller so
+ * this file does not need the storage module's defaults.
+ */
+export function emptyWorkspaceData(settings: any): WorkspaceData {
+  const data: WorkspaceData = {
+    settings,
+    mappings: {}, userEvents: [], tasks: [], caldavPushState: { target: '', records: {}, lastSeenUids: [] },
+    caldavTaskPushState: {}, pendingTaskDeletes: [], caldavEvents: [],
+    eventKinds: {}, areas: [], projects: [], resources: [], itemMembership: {},
+    pendingNoteDeletes: [], eventTypes: [],
+  } as WorkspaceData;
+  validateWorkspaceData(data);
+  return data;
 }
 
 export function parseWorkspaceBackup(text: string): WorkspaceBackup {

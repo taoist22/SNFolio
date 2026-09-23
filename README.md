@@ -126,6 +126,14 @@ After a manual sync, the Calendar & Sync page shows each source's result, pendin
 
 Time entry is tap-only for device usability: choose an hour and quarter-hour minute, with ±5-minute adjustment when needed. The 12-hour picker includes AM/PM; the 24-hour picker offers hours 00–23. Events use common duration buttons and expose an exact-end picker for unusual lengths.
 
+### Clearing Synced Calendar Data
+
+SNFolio keeps its data in the plugin host's storage, so removing and reinstalling the plugin does **not** clear it. To undo a sync that brought in more events than the device can work with, use **⚙ → Connections & Settings → Calendars & Sync**:
+
+- **Remove Synced Events from SNFolio** deletes the events pulled from your calendar account, and **keeps the account connected**: tap **Sync Now** to read them again. Your own events, tasks, PARA and notes stay, and nothing changes on the server.
+- **Remove Calendar Account…** disconnects the account, with a choice of keeping or removing its events. Syncing then reports no sources until you connect an account again.
+- To empty everything, use **Reset SNFolio…** under **Help & Setup → Workspace Backup & Restore…**, which backs up first.
+
 ### Settings Navigation and Clock Format
 
 Open **⚙ → Connections & Settings**. The **Calendars & Sync**, **Notes & Storage**, **App & View**, and **Help & Setup** buttons stay visible while you scroll the selected section. Switching sections returns its contents to the top.
@@ -280,7 +288,8 @@ Open **⚙ → Connections & Settings → Help & Setup → Workspace Backup & Re
 - **Create Backup** saves your tasks, calendars, PARA organization, settings, and note links to `Export/SNFolio Backups` and checks the saved file. Copy backups off the device to protect against loss; they contain your planning data in plain text.
 - Notes and other linked files are **not** in the backup. Back them up separately.
 - Passwords and private subscription addresses are **not** in the backup. Enter them again after restoring.
-- **Choose Backup to Restore…** shows the backup's date and item counts, and lists any linked notes that can no longer be found. **Create Safety Backup and Replace Workspace** first saves a verified backup of your current workspace, then replaces it. Notes are never changed.
+- **Choose Backup to Restore…** lists the backups in `Export/SNFolio Backups`, newest first, with their date and size; tap one to review it. **Browse…** finds a backup kept elsewhere. Reviewing shows the backup's date and item counts, and lists any linked notes that can no longer be found. **Create Safety Backup and Replace Workspace** first saves a verified backup of your current workspace, then replaces it. Notes are never changed.
+- **Reset SNFolio…** empties SNFolio after saving a verified backup first. Unlike a restore, it does not pause synchronization: there is nothing left to review, so you can connect an account again straight away. It clears: every event, task, Project, Area, Resource and note link it holds, plus calendar subscriptions, account settings and all other settings. **Your notes, PDFs and folders are not touched**, and nothing on a calendar server is changed. Use it when a sync brought in more than the device can handle, or to start over; restore the backup if you reset by mistake.
 - After a restore, calendar feeds and account synchronization stay **paused** until you review the restored items and reconnect, so old edits or queued deletions are not sent to your server by surprise.
 
 ---

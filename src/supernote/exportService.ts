@@ -36,6 +36,10 @@ export interface ExportResult {
 }
 
 export interface ParaFolderEntry {
+  /** Last modified, in milliseconds; absent from older native builds. */
+  modified?: number;
+  /** Size in bytes; absent from older native builds. */
+  size?: number;
   name: string;
   path: string;
   isFolder: boolean;

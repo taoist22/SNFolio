@@ -1,7 +1,7 @@
 import { NativeModules } from 'react-native';
 import { FileUtils, RattaFileSelector } from 'sn-plugin-lib';
 import { CalendarStorage } from '../storage/calendarStorage';
-import { parseWorkspaceBackup, WorkspaceBackup } from '../storage/workspaceBackup';
+import { emptyWorkspaceData, parseWorkspaceBackup, WorkspaceBackup } from '../storage/workspaceBackup';
 import { firstPickedFilePath } from '../domain/fileSelection';
 import { ensureFileReadPermission, ensureFileWritePermission } from './pluginPermissions';
 
@@ -73,6 +73,56 @@ export async function createAutoBackup(store: CalendarStorage, now = new Date())
   const verified = await native.readBackupFile(path);
   if (verified !== content) throw new Error('Automatic backup could not be verified.');
   return path;
+}
+
+/**
+ * Empties SNFolio: events, tasks, PARA, note links and settings. A verified
+ * backup is written first and its path returned, so a reset is recoverable.
+ * Notes and other files on the device are never touched.
+ */
+export async function resetWorkspace(store: CalendarStorage, defaultSettings: any): Promise<string> {
+  const safetyPath = await createWorkspaceBackup(store, true);
+  await store.restoreWorkspace(emptyWorkspaceData(defaultSettings));
+  // A restore pauses syncing so old edits and queued deletions can be reviewed
+  // first. A reset leaves nothing to review, so the pause would only block
+  // reconnecting an account.
+  store.updateSettings({ restoreSyncPaused: false });
+  const error = await store.flush();
+  if (error) throw new Error(`SNFolio was reset, but the change could not be saved: ${error}`);
+  return safetyPath;
+}
+
+export interface BackupFile {
+  path: string;
+  name: string;
+  /** Last modified, in milliseconds, when the native build reports it. */
+  modified?: number;
+  size?: number;
+}
+
+/**
+ * The backups in Export / SNFolio Backups, newest first.
+ *
+ * Listed through SNFolio's own native module rather than the system file
+ * picker: the picker refuses paths outside the plugin's whitelist and warns
+ * about Export, even though the plugin can read the file perfectly well.
+ */
+export async function listWorkspaceBackups(): Promise<BackupFile[]> {
+  await permissions();
+  if (!native?.listFolderEntries) return [];
+  let root = '/storage/emulated/0/Export';
+  try { root = await FileUtils.getExportPath() || root; } catch (_) { /* Older firmware. */ }
+  const entries: any[] = await native.listFolderEntries(`${root}/SNFolio Backups`).catch(() => []);
+  return (Array.isArray(entries) ? entries : [])
+    .filter(entry => entry && !entry.isFolder && typeof entry.name === 'string' && entry.name.endsWith('.snfolio.json'))
+    .map(entry => ({ path: entry.path, name: entry.name, modified: entry.modified, size: entry.size }))
+    .sort((a, b) => (b.modified ?? 0) - (a.modified ?? 0) || a.name.localeCompare(b.name));
+}
+
+/** Reads one backup by path, for the in-panel list. */
+export async function readWorkspaceBackup(path: string): Promise<WorkspaceBackup> {
+  await permissions();
+  return parseWorkspaceBackup(await native.readBackupFile(path));
 }
 
 export async function selectWorkspaceBackup(): Promise<WorkspaceBackup | null> {

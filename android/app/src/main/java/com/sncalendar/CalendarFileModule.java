@@ -391,6 +391,9 @@ public class CalendarFileModule extends ReactContextBaseJavaModule {
                 entry.putString("name", name);
                 entry.putString("path", child.getAbsolutePath());
                 entry.putBoolean("isFolder", child.isDirectory() && !lower.endsWith(".note"));
+                // Milliseconds, as a double: React Native has no 64-bit integer type.
+                entry.putDouble("modified", (double) child.lastModified());
+                entry.putDouble("size", (double) child.length());
                 entries.pushMap(entry);
             }
             promise.resolve(entries);

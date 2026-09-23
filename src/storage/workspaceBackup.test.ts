@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeModules } from 'react-native';
 import { CalendarStorage, getSessionPassword } from './calendarStorage';
-import { parseWorkspaceBackup, pausedWorkspace, RESTORE_JOURNAL_KEY, WorkspaceBackup } from './workspaceBackup';
+import { emptyWorkspaceData, parseWorkspaceBackup, pausedWorkspace, RESTORE_JOURNAL_KEY, WorkspaceBackup } from './workspaceBackup';
 
 async function fixture(): Promise<{ store: CalendarStorage; backup: WorkspaceBackup }> {
   const store = new CalendarStorage();
@@ -181,4 +181,17 @@ test('backup rejects unknown project categories and event designations', async (
   backup.data.projects = [];
   backup.data.itemMembership.event = { eventDesignation: 'invalid' };
   expect(() => parseWorkspaceBackup(JSON.stringify(backup))).toThrow('event calendar designation');
+});
+
+test('an empty workspace is valid, holds nothing, and keeps the settings it is given', () => {
+  const settings = { feeds: [], notesDirectory: '/storage/emulated/0/Note/Meetings', weekStartsOn: 1 } as any;
+  const data = emptyWorkspaceData(settings);
+  expect(data.tasks).toEqual([]);
+  expect(data.caldavEvents).toEqual([]);
+  expect(data.projects).toEqual([]);
+  expect(data.mappings).toEqual({});
+  expect(data.settings).toBe(settings);
+  // It must survive the same validation a restore performs.
+  const backup = { format: 'snfolio-workspace', version: 1, createdAt: new Date().toISOString(), data, imports: {} };
+  expect(() => parseWorkspaceBackup(JSON.stringify(backup))).not.toThrow();
 });

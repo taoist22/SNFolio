@@ -744,9 +744,9 @@ export class CaldavService {
       return {
         success: true,
         message:
-          `Connected to ${providerName} CalDAV` +
-          (chosen ? ` — writing events to "${chosen.displayName || 'calendar'}"` : '') +
-          ` (${collections.length} found).${taskNote}`,
+          `Connected to ${providerName} CalDAV.` +
+          (chosen ? ` New events you create go to "${chosen.displayName || 'calendar'}".` : '') +
+          ` ${collections.length} calendar${collections.length === 1 ? '' : 's'} found.${taskNote}`,
         calendarUrl: chosen?.url,
         // iCloud's advertised legacy collection is deliberately not returned;
         // task sync must use an independent account that users also add to the

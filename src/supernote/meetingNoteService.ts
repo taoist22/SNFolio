@@ -22,6 +22,17 @@ export interface MeetingNoteResult {
   warning?: string;
 }
 
+/**
+ * The device refuses createNote while a PDF is open (measured: error 102,
+ * "This app is not allowed to use this API"), and says so in a way that gives
+ * no clue what to do. Nothing in the plugin can lift that, so explain it.
+ */
+export function noteCreationError(message: string): string {
+  return /not allowed to use this API/i.test(message || '')
+    ? 'The device does not allow notes to be created or added to while a PDF is open. Close the PDF, open a note, then try again.'
+    : message;
+}
+
 export class MeetingNoteService {
   async ensureDirectory(dirPath: string): Promise<boolean> {
     try {
@@ -93,7 +104,7 @@ export class MeetingNoteService {
       }
     }
 
-    return { success: false, error: lastError };
+    return { success: false, error: noteCreationError(lastError) };
   }
 
   /**
@@ -275,7 +286,7 @@ export class MeetingNoteService {
             notePath,
             pageNum: lastPage,
             isNewFile: false,
-            error: insertRes?.error?.message || 'Could not append a page to the recurring notebook.',
+            error: noteCreationError(insertRes?.error?.message || 'Could not append a page to the recurring notebook.'),
           };
         }
         pageNum = lastPage + 1;

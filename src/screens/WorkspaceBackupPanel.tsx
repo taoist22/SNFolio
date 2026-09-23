@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BackHandler, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { calendarStorage } from '../storage/calendarStorage';
 import { WorkspaceBackup } from '../storage/workspaceBackup';
-import { createWorkspaceBackup, missingBackupNotes, restoreWorkspaceBackup, selectWorkspaceBackup } from '../supernote/workspaceBackupService';
+import { BackupFile, createWorkspaceBackup, listWorkspaceBackups, missingBackupNotes, readWorkspaceBackup, resetWorkspace, restoreWorkspaceBackup, selectWorkspaceBackup } from '../supernote/workspaceBackupService';
+import { defaultCalendarSettings } from '../storage/calendarStorage';
 
 export function WorkspaceBackupPanel({ disabled, onRestored, onClose = () => {} }: {
   disabled: boolean; onRestored: (message: string) => void; onClose?: () => void;
@@ -15,6 +16,8 @@ export function WorkspaceBackupPanel({ disabled, onRestored, onClose = () => {} 
   const [message, setMessage] = useState('');
   const [safetyPath, setSafetyPath] = useState('');
   const [failedRestore, setFailedRestore] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [saved, setSaved] = useState<BackupFile[] | null>(null);
   const [autoBackup, setAutoBackup] = useState(calendarStorage.getSettings().autoBackupEnabled !== false);
   const lastAuto = calendarStorage.getSettings().lastAutoBackupDay;
   useEffect(() => {
@@ -70,13 +73,53 @@ export function WorkspaceBackupPanel({ disabled, onRestored, onClose = () => {} 
       setMessage(`Backup saved and verified:\n${await createWorkspaceBackup(calendarStorage)}`);
     }); }, disabled || busy || failedRestore)}
     {button('Choose Backup to Restore…', () => { setBackup(null); setSafetyPath(''); void run(async () => {
-      const selected = await selectWorkspaceBackup();
-      if (!selected) { setMessage('No backup selected.'); return; }
-      const missingPaths = await missingBackupNotes(selected);
-      setMissing(missingPaths);
-      setBackup(selected);
-      setMessage('Review this backup before replacing your workspace.');
+      const files = await listWorkspaceBackups();
+      setSaved(files);
+      setMessage(files.length
+        ? 'Tap a backup to review it.'
+        : 'No backups found in Export / SNFolio Backups. Use Browse… if yours is kept somewhere else.');
     }); }, disabled || busy || failedRestore)}
+    {saved !== null && !backup && <View style={styles.list}>
+      {saved.map(file => (
+        <TouchableOpacity key={file.path} accessibilityRole="button" style={styles.listRow} onPress={() => void run(async () => {
+          const selected = await readWorkspaceBackup(file.path);
+          const missingPaths = await missingBackupNotes(selected);
+          setMissing(missingPaths);
+          setBackup(selected);
+          setSaved(null);
+          setMessage('Review this backup before replacing your workspace.');
+        })}>
+          <Text allowFontScaling={false} style={styles.listName}>{file.name.replace(/\.snfolio\.json$/, '')}</Text>
+          <Text allowFontScaling={false} style={styles.listMeta}>
+            {`${file.modified ? new Date(file.modified).toLocaleString() : 'date unknown'}${file.size ? ` · ${Math.max(1, Math.round(file.size / 1024))} KB` : ''}`}
+          </Text>
+        </TouchableOpacity>
+      ))}
+      {button('Browse…', () => { void run(async () => {
+        const selected = await selectWorkspaceBackup();
+        if (!selected) { setMessage('No backup selected.'); return; }
+        const missingPaths = await missingBackupNotes(selected);
+        setMissing(missingPaths);
+        setBackup(selected);
+        setSaved(null);
+        setMessage('Review this backup before replacing your workspace.');
+      }); }, busy)}
+    </View>}
+    {confirmReset ? <View style={styles.resetBox}>
+      <Text allowFontScaling={false} style={styles.text}>
+        Reset SNFolio? A verified backup is saved first, then SNFolio is emptied:
+        {'\n'}• every event, task, Project, Area, Resource and note link it holds;
+        {'\n'}• calendar subscriptions, account settings and all other settings.
+        {'\n\n'}Your notes, PDFs and folders on the device are NOT touched, and nothing on a calendar
+        server is changed. Restore the backup afterwards if you reset by mistake.
+      </Text>
+      {button('Create Backup and Reset SNFolio', () => { setConfirmReset(false); void run(async () => {
+        const path = await resetWorkspace(calendarStorage, defaultCalendarSettings());
+        setSafetyPath(path);
+        onRestored(`SNFolio has been reset. Backup of what it held: ${path}`);
+      }); }, busy || failedRestore)}
+      {button('Cancel', () => setConfirmReset(false), busy)}
+    </View> : button('Reset SNFolio…', () => { setBackup(null); setSafetyPath(''); setConfirmReset(true); }, disabled || busy || failedRestore)}
     {open && <View>
         <Text allowFontScaling={false} style={styles.text}>{message}</Text>
         {safetyPath ? <Text allowFontScaling={false} style={styles.text}>Safety backup: {safetyPath}</Text> : null}
@@ -112,6 +155,11 @@ const styles = StyleSheet.create({
   text: { fontSize: 15, lineHeight: 22, marginBottom: 12, color: '#000' },
   button: { borderWidth: 1, borderColor: '#000', padding: 14, marginVertical: 6 },
   toggleRow: { borderWidth: 2, borderColor: '#000', padding: 12, marginBottom: 12 },
+  resetBox: { borderWidth: 2, borderColor: '#000', padding: 12, marginVertical: 8 },
+  list: { borderWidth: 1, borderColor: '#000', marginBottom: 12 },
+  listRow: { minHeight: 52, borderBottomWidth: 1, borderBottomColor: '#c0c0c0', paddingHorizontal: 10, paddingVertical: 8, justifyContent: 'center' },
+  listName: { fontSize: 15, fontWeight: 'bold', color: '#000' },
+  listMeta: { fontSize: 12, color: '#404040', marginTop: 2 },
   toggleText: { fontSize: 16, fontWeight: 'bold', color: '#000', marginBottom: 6 },
   buttonText: { fontSize: 16, fontWeight: 'bold', color: '#000' },
   disabled: { opacity: 0.4 },

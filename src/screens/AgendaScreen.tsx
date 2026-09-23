@@ -3,6 +3,12 @@ import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderForDate, 
 import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
 import { useWorkspaceActivity } from './useWorkspaceActivity';
 import { WorkspaceBackupPanel } from './WorkspaceBackupPanel';
+import { PerfReadout, usePaintTiming } from './PerfReadout';
+import { sameKeys, sameNotePaths } from './stateEquality';
+// Screen timings stay in the build but have no switch: they were used to find
+// where a busy calendar spent its time, and a later release can expose them
+// again without rebuilding the instrumentation.
+import { setPerfTracing, timePerf } from '../domain/perfTrace';
 import { BulkFileItem, BulkFilePanel } from './BulkFilePanel';
 import { autoBackupDue, createAutoBackup, localDayKey } from '../supernote/workspaceBackupService';
 import { pickLinkedNote } from '../supernote/pickLinkedNote';
@@ -10,7 +16,7 @@ import { DayPlannerSections, PlannerSection } from './DayPlannerSections';
 import { SettingChoice } from './SettingChoice';
 import { TimeFormatContext } from './TimeFormatContext';
 import { TimeFormat, formatDateTime } from '../domain/timeOfDay';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -55,7 +61,7 @@ import {
   templateLabel,
   templateSettingKey,
 } from '../domain/noteTemplates';
-import { expandEventsForDate, parseIcsContentStrict } from '../domain/icsParser';
+import { expandEventsByDay, expandEventsForDate, parseIcsContentStrict } from '../domain/icsParser';
 import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
 import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
@@ -200,6 +206,22 @@ function eventNotePathFor(event: Pick<CalendarEvent, 'uid' | 'recurringSeriesId'
   return eventNoteMapping(key => calendarStorage.getMapping(key), event, perSessionNotes(event))?.notePath || undefined;
 }
 
+/** Each occurrence once, however many days it spans; tasks and their mirrors left out. */
+function uniqueOccurrences(byDay: Map<string, CalendarEvent[]>): CalendarEvent[] {
+  const seen = new Set<string>();
+  const result: CalendarEvent[] = [];
+  for (const day of byDay.values()) {
+    for (const event of day) {
+      if (event.isTask || event.isTaskMirror) continue;
+      const key = `${event.uid}-${event.start.toISOString()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(event);
+    }
+  }
+  return result;
+}
+
 function countPendingSyncItems(): number {
   const settings = calendarStorage.getSettings();
   let count = 0;
@@ -229,8 +251,8 @@ function countPendingSyncItems(): number {
   return count;
 }
 
-export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice = '' }: {
-  onWorkspaceRestored?: (message: string) => void; workspaceNotice?: string;
+export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice = '', onDismissNotice = () => {} }: {
+  onWorkspaceRestored?: (message: string) => void; workspaceNotice?: string; onDismissNotice?: () => void;
 } = {}): React.JSX.Element {
   const { busy: workspaceBusy, track: trackWorkspaceOperation } = useWorkspaceActivity();
   const [showWorkspaceBackup, setShowWorkspaceBackup] = useState(false);
@@ -258,7 +280,11 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const [allParsedEvents, setAllParsedEvents] = useState<CalendarEvent[]>([]);
   const [calendarFeeds, setCalendarFeeds] = useState<CalendarFeed[]>([]);
   const [feedProjectPicker, setFeedProjectPicker] = useState<string | null>(null);
+  const [confirmRemoveSyncedEvents, setConfirmRemoveSyncedEvents] = useState(false);
+  const [confirmRemoveCalendarAccount, setConfirmRemoveCalendarAccount] = useState(false);
   const [collapsedProjectCards, setCollapsedProjectCards] = useState<string[]>([]);
+  // The whole panel, so a slow screen can be compared with the part measured inside it.
+  usePaintTiming('screen draw', () => `${viewMode}${plannerMode ? `/${plannerMode}` : ''}`);
   const [bulkFileFeed, setBulkFileFeed] = useState<CalendarFeed | null>(null);
   /**
    * Whether an imported or subscribed feed is configured. Drives the Sync Now
@@ -433,6 +459,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setDailyNoteFormat(settings.dailyNoteFormat || 'YYYY-MM-DD');
     setRouteEventNotesToPara(Boolean(settings.routeEventNotesToPara));
     setCollapsedProjectCards(settings.collapsedProjectCards || []);
+    setPerfTracing(Boolean(settings.showScreenTimings));
     setMeetingParaSubpath(settings.meetingParaSubpath ?? 'Meetings');
     setClassParaSubpath(settings.classParaSubpath ?? 'Classes');
     setCaldavCustomUrl(settings.caldavCustomUrl || '');
@@ -544,24 +571,95 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /**
+   * Everything the calendar may show, filtered once.
+   *
+   * Each screen used to filter for itself, on every render: on device that was
+   * ~140 ms per call for a busy calendar, and it also handed the month grid a
+   * new array each time, so nothing downstream could be reused.
+   */
+  /**
+   * What each row shows beside a title: its C/M marker and whether a file is
+   * linked. Both were rebuilt on every render — a map over every event and
+   * task — and the new object re-rendered every consumer, including the month
+   * grid, several times per interaction.
+   */
+  const eventDesignations = useMemo(() => {
+    void membershipRevision;
+    return Object.fromEntries([
+      ...allParsedEvents.map(event => [
+        noteIdentity(event), resolveEventDesignation(calendarStorage.getMembership(noteIdentity(event)), projects),
+      ]),
+      ...tasks.map(task => [task.uid, resolveTaskDesignation(calendarStorage.getMembership(task.uid), projects)]),
+    ]);
+  }, [allParsedEvents, tasks, projects, membershipRevision]);
+
+  const linkedFilePaths = useMemo(() => {
+    void membershipRevision;
+    void refreshState;
+    return Object.fromEntries(
+      Object.entries(calendarStorage.getAllMappings())
+        // With one note per session, a series notebook is not every session's note.
+        .filter(([, mapping]) => mapping.perSession || !mapping.seriesId || mapping.seriesId === mapping.eventUid ||
+          !perSessionNotes({ uid: mapping.eventUid, recurringSeriesId: mapping.seriesId }))
+        .map(([identity, mapping]) => [identity, mapping.notePath])
+    );
+  }, [membershipRevision, refreshState]);
+
+  /**
+   * Callbacks with a fixed identity for the day grid.
+   *
+   * The handlers themselves are rebuilt every render, which would make the
+   * memoised grid redraw anyway. These call whichever version is current, so
+   * the grid's props only change when its data does.
+   */
+  const dayGridLatest = useRef({
+    openEvent: (event: CalendarEvent) => { void event; },
+    openNote: (path: string) => { void path; },
+    requestNote: (event: CalendarEvent) => { void event; },
+    deleteItem: (event: CalendarEvent) => { void event; },
+    typeLabel: (event: CalendarEvent): string => { void event; return ''; },
+  });
+  const dayGridHandlers = useMemo(() => ({
+    onEditEvent: (event: CalendarEvent) => dayGridLatest.current.openEvent(event),
+    onNoteAction: (event: CalendarEvent, existingPath?: string) => {
+      if (existingPath) dayGridLatest.current.openNote(existingPath);
+      else dayGridLatest.current.requestNote(event);
+    },
+    onDeleteEvent: (event: CalendarEvent) => dayGridLatest.current.deleteItem(event),
+    typeLabel: (event: CalendarEvent) => dayGridLatest.current.typeLabel(event),
+  }), []);
+
+  const visibleEvents = useMemo(() => {
+    // Hiding a feed item changes the settings, not the events.
+    void refreshState;
+    return timePerf(
+      'filter events',
+      () => filterEvents(allParsedEvents, {
+        ...calendarStorage.getSettings(),
+        hideAllDayEvents: hideAllDay,
+        hideSoloEvents: hideSolo,
+      }),
+      () => `${allParsedEvents.length} events`,
+    );
+  }, [allParsedEvents, hideAllDay, hideSolo, refreshState]);
+
   useEffect(() => {
-    const settings = calendarStorage.getSettings();
-    const activeSettings = {
-      ...settings,
-      hideAllDayEvents: hideAllDay,
-      hideSoloEvents: hideSolo,
-    };
-
-    const filteredAll = filterEvents(allParsedEvents, activeSettings);
-    const todays = expandEventsForDate(filteredAll, selectedDate);
+    const todays = timePerf('day build', () => expandEventsForDate(visibleEvents, selectedDate), () => `${visibleEvents.length} in window`);
     setEvents(todays);
-  }, [selectedDate, allParsedEvents, hideAllDay, hideSolo]);
+  }, [selectedDate, visibleEvents]);
 
-  // Synchronous Date Selection Handler to open Day View tab
-  const handleSelectDate = (d: Date) => {
+  // Synchronous Date Selection Handler to open Day View tab.
+  // Stable identities: the month grid only re-renders when its inputs change.
+  const handleSelectDate = useCallback((d: Date) => {
     setSelectedDate(d);
     setViewMode('agenda');
-  };
+  }, []);
+
+  const handleOpenDateActions = useCallback((d: Date) => {
+    setSelectedDate(d);
+    setShowDateActionSheet(true);
+  }, []);
 
   const handlePrevDay = () => {
     const d = new Date(selectedDate);
@@ -734,6 +832,16 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    * when SNFolio first opens.
    */
   const autoBackupRunning = useRef(false);
+  /**
+   * Whether a guessed note path exists, remembered for the session.
+   *
+   * The sweep asks the filesystem about every event on the visible day that
+   * has no recorded note. On a busy calendar that is dozens of native file
+   * calls each time the day changes, repeated every time that day comes back.
+   */
+  const guessedNotePaths = useRef<Map<string, boolean>>(new Map());
+  /** Which sweep the remembered answers belong to. */
+  const guessedNotePathsFor = useRef<string>('');
   const maybeAutoBackup = async () => {
     const now = new Date();
     if (autoBackupRunning.current || !calendarStorage.isLoaded() || !autoBackupDue(calendarStorage.getSettings(), now)) return;
@@ -1096,16 +1204,18 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       });
 
       const push = await pushPendingItems();
+      // Connecting used to upload only, so an account with events on the
+      // server showed nothing until the user knew to press Sync Now.
+      const pull = await handlePullCaldavEvents({ silent: true });
 
       // Preserve discovery details, including the explicit iCloud legacy-task
       // warning, rather than replacing them with a generic success message.
-      if (push.pushed > 0) {
-        setStatusMsg(`${res.message} Synced ${push.pushed} of ${push.attempted} changed items.`);
-      } else if (push.attempted > 0) {
-        setStatusMsg(`${res.message} Sync error: ${push.error}`);
-      } else {
-        setStatusMsg(`${res.message} Everything already up to date.`);
-      }
+      const uploaded = push.pushed > 0
+        ? ` Uploaded ${push.pushed} of ${push.attempted} changed items.`
+        : push.attempted > 0 ? ` Upload error: ${push.error}` : '';
+      setStatusMsg(pull.success
+        ? `${res.message}${uploaded} Read ${pull.count} event(s) from the account.`
+        : `${res.message}${uploaded} Could not read events yet${pull.error ? `: ${pull.error}` : ''}. Tap Sync Now to try again.`);
     } else {
       setStatusMsg(`CalDAV Connection Failed: ${res.message}`);
     }
@@ -1230,6 +1340,58 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     calendarStorage.updateSettings({ taskCaldavEnabled: true });
     await calendarStorage.flush();
     setStatusMsg('Task synchronization resumed. Tap Sync Now to reconcile pending changes.');
+  });
+
+  /** Empties the cached CalDAV events after a sync brought back more than the device can work with. */
+  /** Lifts the pause a restore puts on syncing, from the banner or from Help & Setup. */
+  const allowReconnection = trackWorkspaceOperation(async () => {
+    calendarStorage.updateSettings({ restoreSyncPaused: false });
+    const error = await calendarStorage.flush();
+    if (error) calendarStorage.updateSettings({ restoreSyncPaused: true });
+    setStatusMsg(error || 'Review acknowledged. Feeds and accounts remain paused; reconnect them in Calendars & Sync when ready.');
+    setRefreshState(value => value + 1);
+  });
+
+  const handleRemoveSyncedEvents = trackWorkspaceOperation(async () => {
+    const removed = calendarStorage.removeSyncedEvents();
+    setConfirmRemoveSyncedEvents(false);
+    const cachedUids = new Set(allParsedEvents.filter(event => event.sourceKind === 'caldav').map(event => event.uid));
+    setAllParsedEvents(previous => previous.filter(event => event.sourceKind !== 'caldav' && !cachedUids.has(event.uid)));
+    setRefreshState(value => value + 1);
+    const persistenceError = await calendarStorage.flush();
+    setSyncDetails([]);
+    setSyncPhase('idle');
+    setStatusMsg(persistenceError
+      ? `Removed ${removed} synced event(s) for this session, but could not save: ${persistenceError}`
+      : `Removed ${removed} synced event(s) from SNFolio. The account stays connected: tap Sync Now to read them again. Your own events, tasks, PARA and notes are unchanged, and nothing was changed on the server.`);
+  });
+
+  /** Disconnects the calendar account, optionally taking its cached events with it. */
+  const handleRemoveCalendarAccount = trackWorkspaceOperation(async (removeEvents: boolean) => {
+    const removed = removeEvents ? calendarStorage.removeSyncedEvents() : 0;
+    if (removeEvents) {
+      const cachedUids = new Set(allParsedEvents.filter(event => event.sourceKind === 'caldav').map(event => event.uid));
+      setAllParsedEvents(previous => previous.filter(event => event.sourceKind !== 'caldav' && !cachedUids.has(event.uid)));
+    }
+    calendarStorage.updateSettings({
+      caldavEnabled: false,
+      caldavAppleId: '',
+      caldavPassword: '',
+      caldavCalendarUrl: '',
+      caldavCustomUrl: '',
+    });
+    setCaldavEnabled(false);
+    setCaldavAppleId('');
+    setCaldavPassword('');
+    setCaldavUrl('');
+    setConfirmRemoveCalendarAccount(false);
+    setRefreshState(value => value + 1);
+    const persistenceError = await calendarStorage.flush();
+    setSyncDetails([]);
+    setSyncPhase('idle');
+    setStatusMsg(persistenceError
+      ? `Disconnected the calendar account for this session, but could not save: ${persistenceError}`
+      : `Disconnected the calendar account${removeEvents ? ` and removed ${removed} synced event(s)` : ' and kept its events in SNFolio'}. Nothing was changed on the server. Sync Now will report no sources until you connect an account again.`);
   });
 
   const handleRemoveTaskAccount = trackWorkspaceOperation(async (removeLocalTasks: boolean) => {
@@ -2210,39 +2372,18 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   /** Every event in the selected week, one entry per occurrence, for the weekly review. */
   const weekEventsForReview = useMemo(() => {
     const { start } = plannerWeekRange(selectedDate, weekStartsOn);
-    const seen = new Set<string>();
-    const result: CalendarEvent[] = [];
-    for (let offset = 0; offset < 7; offset++) {
-      const day = new Date(start);
-      day.setDate(day.getDate() + offset);
-      for (const event of expandEventsForDate(allParsedEvents, day)) {
-        if (event.isTask || event.isTaskMirror) continue;
-        const key = `${event.uid}-${event.start.toISOString()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(event);
-      }
-    }
-    return result;
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return uniqueOccurrences(expandEventsByDay(allParsedEvents, start, end));
   }, [allParsedEvents, selectedDate, weekStartsOn]);
 
   const paraUpcomingEvents = useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const seen = new Set<string>();
-    const result: CalendarEvent[] = [];
-    for (let offset = 0; offset < 60; offset++) {
-      const day = new Date(start);
-      day.setDate(day.getDate() + offset);
-      for (const event of expandEventsForDate(allParsedEvents, day)) {
-        if (event.isTask || event.isTaskMirror) continue;
-        const key = `${event.uid}-${event.start.toISOString()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push(event);
-      }
-    }
-    return result.sort((a, b) => a.start.getTime() - b.start.getTime());
+    const end = new Date(start);
+    end.setDate(end.getDate() + 59);
+    return uniqueOccurrences(expandEventsByDay(allParsedEvents, start, end))
+      .sort((a, b) => a.start.getTime() - b.start.getTime());
   }, [allParsedEvents]);
 
   /**
@@ -2332,7 +2473,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         }
       })
     ).then(keys => {
-      if (!cancelled) setDailyNoteDates(new Set(keys.filter((k): k is string => k !== null)));
+      if (cancelled) return;
+      const next = new Set(keys.filter((k): k is string => k !== null));
+      setDailyNoteDates(previous => sameKeys(previous, next) ? previous : next);
     });
 
     return () => {
@@ -2349,6 +2492,13 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     const dir = (settings.notesDirectory || '/storage/emulated/0/Note/Meetings').replace(/\/+$/, '');
 
     const check = async () => {
+      // Creating, linking or moving a note changes what is on disk and bumps
+      // refreshState. Forget the remembered answers before this pass reads
+      // them, rather than in an effect that could run after it.
+      if (guessedNotePathsFor.current !== `${refreshState}|${targetNotesDir}`) {
+        guessedNotePaths.current.clear();
+        guessedNotePathsFor.current = `${refreshState}|${targetNotesDir}`;
+      }
       const found: Record<string, string> = {};
 
       for (const evt of events) {
@@ -2370,17 +2520,25 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
           calendarStorage.getEventKind(noteIdentity(evt)) || 'meeting'
         );
         const path = `${dir}/${name}`;
+        const remembered = guessedNotePaths.current.get(path);
+        if (remembered !== undefined) {
+          if (remembered) found[evt.uid] = path;
+          continue;
+        }
         try {
-          if (await FileUtils.exists(path)) {
-            found[evt.uid] = path;
-          }
+          const exists = Boolean(await FileUtils.exists(path));
+          guessedNotePaths.current.set(path, exists);
+          if (exists) found[evt.uid] = path;
         } catch (e) {
           // Unknown rather than absent; leaving it out means the row offers
           // Create, which is the safe default only when we truly cannot tell.
+          // Not remembered either: a failed check must be retried.
         }
       }
 
-      if (!cancelled) setEventNotePaths(found);
+      // Replacing this with an equal object re-rendered the whole day, grid
+      // included, for nothing: most sweeps find exactly what the last one did.
+      if (!cancelled) setEventNotePaths(previous => sameNotePaths(previous, found) ? previous : found);
     };
 
     void check();
@@ -2471,7 +2629,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     selectedDate
   );
   // Always relative to today, regardless of which month the grid is showing.
-  const todayTaskSections = sectionTasksForDay(tasks, new Date());
+  const todayTaskSections = useMemo(() => sectionTasksForDay(tasks, new Date()), [tasks]);
 
   /**
    * Optionally mirrors a task onto the event calendar. This is independent of
@@ -3514,20 +3672,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   };
 
   /** Tomorrow's first calendar event; tasks already have a richer section above. */
-  const lookaheadSummary = (() => {
+  // Expanding tomorrow on every render cost a busy calendar real time on device.
+  const lookaheadSummary = useMemo(() => {
     const tomorrow = new Date(selectedDate);
     tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const evts = expandEventsForDate(
-      filterEvents(allParsedEvents, {
-        ...calendarStorage.getSettings(),
-        hideAllDayEvents: hideAllDay,
-        hideSoloEvents: hideSolo,
-      }),
-      tomorrow
-    );
-    return tomorrowScheduleSummary(evts, timeFormat);
-  })();
+    return tomorrowScheduleSummary(expandEventsForDate(visibleEvents, tomorrow), timeFormat);
+  }, [selectedDate, visibleEvents, timeFormat]);
 
   /** Display name of an event's type, for status lines and schedule blocks. */
   const eventTypeName = (event: CalendarEvent): string => {
@@ -4184,6 +4334,18 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     });
   })();
 
+  dayGridLatest.current = {
+    openEvent: handleOpenEventDetails,
+    openNote: path => { void handleOpenExistingNote(path); },
+    requestNote: handleRequestNoteCreation,
+    deleteItem: event => { void handleDeleteItem(event); },
+    typeLabel: event => {
+      const id = calendarStorage.getEventType(noteIdentity(event));
+      const type = eventTypes.find(candidate => candidate.id === id);
+      return type ? `${type.icon ? `${type.icon} ` : ''}${type.name}` : '';
+    },
+  };
+
   if (storageLoadError) {
     return <SafeAreaView style={styles.root}>
       <Text allowFontScaling={false} style={styles.sectionTitle}>Saved workspace could not be loaded</Text>
@@ -4201,25 +4363,30 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     (archiveFolderPrompt.item as Project).status === 'done';
 
   return (
-    <EventDesignationsContext.Provider value={Object.fromEntries([
-      ...allParsedEvents.map(event => [
-        noteIdentity(event), resolveEventDesignation(calendarStorage.getMembership(noteIdentity(event)), projects),
-      ]),
-      ...tasks.map(task => [task.uid, resolveTaskDesignation(calendarStorage.getMembership(task.uid), projects)]),
-    ])}>
-    <LinkedFilePathsContext.Provider value={Object.fromEntries(
-      Object.entries(calendarStorage.getAllMappings())
-        // With one note per session, a series notebook is not every session's note.
-        .filter(([, mapping]) => mapping.perSession || !mapping.seriesId || mapping.seriesId === mapping.eventUid ||
-          !perSessionNotes({ uid: mapping.eventUid, recurringSeriesId: mapping.seriesId }))
-        .map(([identity, mapping]) => [identity, mapping.notePath])
-    )}>
+    <EventDesignationsContext.Provider value={eventDesignations}>
+    <LinkedFilePathsContext.Provider value={linkedFilePaths}>
     <TimeFormatContext.Provider value={timeFormat}>
     <SafeAreaView style={styles.root}>
-      {workspaceNotice ? <Text allowFontScaling={false} style={styles.bodyText}>{workspaceNotice}</Text> : null}
-      {calendarStorage.getSettings().restoreSyncPaused ? <Text allowFontScaling={false} style={styles.bodyText}>
-        Restored workspace: synchronization is paused. Review it in Help & Setup before reconnecting.
-      </Text> : null}
+      {workspaceNotice ? (
+        <View style={styles.noticeRow}>
+          <Text allowFontScaling={false} style={[styles.bodyText, styles.noticeText]}>{workspaceNotice}</Text>
+          <TouchableOpacity style={styles.noticeDismiss} accessibilityRole="button" onPress={onDismissNotice}>
+            <Text allowFontScaling={false} style={styles.noticeDismissText}>Dismiss</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      {calendarStorage.getSettings().restoreSyncPaused ? (
+        <View style={styles.noticeRow}>
+          <Text allowFontScaling={false} style={[styles.bodyText, styles.noticeText]}>
+            Restored workspace: synchronization is paused until you review it. Reconnecting can upload old edits
+            or apply {calendarStorage.getPendingTaskDeletes().length} queued task deletion(s) to your server.
+          </Text>
+          <TouchableOpacity style={styles.noticeDismiss} accessibilityRole="button" onPress={() => void allowReconnection()}>
+            <Text allowFontScaling={false} style={styles.noticeDismissText}>Allow Reconnection</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      <PerfReadout />
       {/* Top Header Bar */}
       <View style={styles.headerBar}>
         <View style={styles.titleWithSwitcher}>
@@ -4973,6 +5140,50 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 </Text>
               )}
             </View>
+          )}
+
+          {confirmRemoveSyncedEvents ? (
+            <View style={styles.resetBox}>
+              <Text allowFontScaling={false} style={styles.sectionTitle}>Remove synced events</Text>
+              <Text allowFontScaling={false} style={styles.bodyText}>
+                Remove every event SNFolio pulled from the calendar account? The account stays connected.
+                 Your own events, tasks, PARA and notes stay, and nothing changes on the server. Syncing again brings them back.
+              </Text>
+              <TouchableOpacity style={styles.deleteOptionBtnDanger} onPress={() => void handleRemoveSyncedEvents()}>
+                <Text allowFontScaling={false} style={styles.deleteOptionBtnTextDanger}>Remove Synced Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmRemoveSyncedEvents(false)}>
+                <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmRemoveSyncedEvents(true)}>
+              <Text allowFontScaling={false} style={styles.cancelBtnText}>Remove Synced Events from SNFolio</Text>
+            </TouchableOpacity>
+          )}
+          <Text allowFontScaling={false} style={styles.checkSettingHint}>
+            Removing events keeps the account connected; Sync Now reads them again. Disconnecting stops syncing altogether.
+          </Text>
+          {confirmRemoveCalendarAccount ? (
+            <View style={styles.resetBox}>
+              <Text allowFontScaling={false} style={styles.sectionTitle}>Disconnect account</Text>
+              <Text allowFontScaling={false} style={styles.bodyText}>
+                Disconnect the calendar account? SNFolio forgets its address and password and stops syncing. Nothing on the server changes.
+              </Text>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => void handleRemoveCalendarAccount(false)}>
+                <Text allowFontScaling={false} style={styles.cancelBtnText}>Remove Account — Keep Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteOptionBtnDanger} onPress={() => void handleRemoveCalendarAccount(true)}>
+                <Text allowFontScaling={false} style={styles.deleteOptionBtnTextDanger}>Remove Account &amp; Synced Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmRemoveCalendarAccount(false)}>
+                <Text allowFontScaling={false} style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setConfirmRemoveCalendarAccount(true)}>
+              <Text allowFontScaling={false} style={styles.cancelBtnText}>Remove Calendar Account…</Text>
+            </TouchableOpacity>
           )}
 
           </View>
@@ -5733,22 +5944,6 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             onPress={() => setShowWorkspaceBackup(true)}>
             <Text allowFontScaling={false} style={styles.actionSheetBtnText}>Workspace Backup & Restore…</Text>
           </TouchableOpacity>
-          {calendarStorage.getSettings().restoreSyncPaused && <View>
-            <Text allowFontScaling={false} style={styles.bodyText}>
-              Restored synchronization is paused. Review restored tasks, events, and pending changes before reconnecting.
-              Reconnecting can upload old edits or apply {calendarStorage.getPendingTaskDeletes().length} queued task deletion(s) to your server.
-              Account passwords and private subscription URLs must be entered again.
-            </Text>
-            <TouchableOpacity style={styles.actionSheetBtn} onPress={async () => {
-              calendarStorage.updateSettings({ restoreSyncPaused: false });
-              const error = await calendarStorage.flush();
-              if (error) calendarStorage.updateSettings({ restoreSyncPaused: true });
-              setStatusMsg(error || 'Review acknowledged. Feeds and accounts remain paused; reconnect them in Calendar & Sync when ready.');
-              setRefreshState(value => value + 1);
-            }}>
-              <Text allowFontScaling={false} style={styles.actionSheetBtnText}>I Reviewed the Restored Changes — Allow Reconnection</Text>
-            </TouchableOpacity>
-          </View>}
 
           <Text allowFontScaling={false} style={[styles.sectionTitle, { marginTop: 15 }]}>Notes Queued for Deletion</Text>
           <Text allowFontScaling={false} style={styles.bodyText}>
@@ -6105,16 +6300,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               currentDate={selectedDate}
               selectedDate={selectedDate}
               dailyNoteDates={dailyNoteDates}
-              allEvents={filterEvents(allParsedEvents, {
-                ...calendarStorage.getSettings(),
-                hideAllDayEvents: hideAllDay,
-                hideSoloEvents: hideSolo,
-              })}
+              allEvents={visibleEvents}
               onSelectDate={handleSelectDate}
-              onOpenActionSheet={d => {
-                setSelectedDate(d);
-                setShowDateActionSheet(true);
-              }}
+              onOpenActionSheet={handleOpenDateActions}
             />
 
             {/* The two task pools a date grid structurally cannot show: undated
@@ -6173,11 +6361,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               selectedDate={selectedDate}
               weekStartsOn={weekStartsOn}
               dayCount={calendarWeekLength}
-              events={filterEvents(allParsedEvents, {
-                ...calendarStorage.getSettings(),
-                hideAllDayEvents: hideAllDay,
-                hideSoloEvents: hideSolo,
-              })}
+              events={visibleEvents}
               tasks={tasks}
               onOpenDay={date => {
                 setSelectedDate(date);
@@ -6409,17 +6593,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                     startHour={scheduleStartHour}
                     endHour={scheduleEndHour}
                     notePaths={eventNotePaths}
-                    onEditEvent={handleOpenEventDetails}
-                    onNoteAction={(evt, existingPath) => {
-                      if (existingPath) handleOpenExistingNote(existingPath);
-                      else handleRequestNoteCreation(evt);
-                    }}
-                    onDeleteEvent={handleDeleteItem}
-                    typeLabel={evt => {
-                      const id = calendarStorage.getEventType(noteIdentity(evt));
-                      const type = eventTypes.find(t => t.id === id);
-                      return type ? `${type.icon ? `${type.icon} ` : ''}${type.name}` : '';
-                    }}
+                    onEditEvent={dayGridHandlers.onEditEvent}
+                    onNoteAction={dayGridHandlers.onNoteAction}
+                    onDeleteEvent={dayGridHandlers.onDeleteEvent}
+                    typeLabel={dayGridHandlers.typeLabel}
                   />
                   </PlannerSection>
                 </View>
@@ -6764,6 +6941,11 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontSize: 13,
   },
+  noticeRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#000000', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6 },
+  noticeText: { flex: 1, marginRight: 8 },
+  noticeDismiss: { minHeight: 40, minWidth: 92, borderWidth: 2, borderColor: '#000000', borderRadius: 4, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, backgroundColor: '#ffffff' },
+  noticeDismissText: { fontSize: 13, fontWeight: 'bold', color: '#000000' },
+  resetBox: { borderWidth: 2, borderColor: '#000000', borderRadius: 6, padding: 10, marginTop: 8, marginBottom: 8, backgroundColor: '#ffffff' },
   statusBannerWithUndo: { flexDirection: 'row', alignItems: 'center' },
   statusTextWithUndo: { flex: 1 },
   undoButton: {

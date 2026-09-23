@@ -5,6 +5,8 @@ import {
   unfoldIcsContent,
   unescapeIcsValue,
   expandEventsForDate,
+  expandEventsByDay,
+  eventsOnDay,
 } from './icsParser';
 import { CalendarEvent } from './types';
 
@@ -709,4 +711,88 @@ test('a Brightspace feed keeps the course in LOCATION', () => {
   ].join('\r\n');
   const [event] = parseIcsContent(ics, 'All Courses');
   expect(event.location).toBe('IDS-105-18678-M01 Awareness & Online Learning 2026 C-5 (Aug - Oct)');
+});
+
+test('a month of days expands each recurring event once, not once per day', () => {
+  // exceptionDates is read while a rule is being walked, so counting reads
+  // counts expansion work rather than wall-clock time.
+  let expansionReads = 0;
+  const event: CalendarEvent = {
+    uid: 'weekly', summary: 'Standing meeting',
+    start: new Date(2026, 0, 5, 9), end: new Date(2026, 0, 5, 10),
+    allDay: false, attendees: [], rrule: 'FREQ=WEEKLY;COUNT=520',
+  };
+  Object.defineProperty(event, 'exceptionDates', { get: () => { expansionReads++; return undefined; } });
+
+  const days = Array.from({ length: 30 }, (_, index) => new Date(2026, 5, 1 + index));
+  const first = days.map(day => expandEventsForDate([event], day));
+  const readsAfterFirstMonth = expansionReads;
+  const again = days.map(day => expandEventsForDate([event], day));
+
+  // Same answers as before caching: June 2026 has Mondays on the 1st, 8th, 15th, 22nd and 29th.
+  expect(first.filter(instances => instances.length === 1)).toHaveLength(5);
+  expect(first).toEqual(again);
+  // One walk of the rule covers the whole month; the second pass adds none.
+  expect(readsAfterFirstMonth).toBeLessThan(60);
+  expect(expansionReads).toBe(readsAfterFirstMonth);
+});
+
+test('an edited recurring event is expanded again rather than reusing the old answer', () => {
+  const base = {
+    uid: 'weekly', summary: 'Standing meeting', start: new Date(2026, 0, 5, 9), end: new Date(2026, 0, 5, 10),
+    allDay: false, attendees: [],
+  };
+  const weekly: CalendarEvent = { ...base, rrule: 'FREQ=WEEKLY;COUNT=520' };
+  expect(expandEventsForDate([weekly], new Date(2026, 5, 8))).toHaveLength(1);
+  // Sync and parsing build new objects, so the cache cannot hold a stale rule.
+  const daily: CalendarEvent = { ...base, rrule: 'FREQ=DAILY;COUNT=520' };
+  expect(expandEventsForDate([daily], new Date(2026, 5, 9))).toHaveLength(1);
+  expect(expandEventsForDate([weekly], new Date(2026, 5, 9))).toHaveLength(0);
+});
+
+test('a whole range expanded at once matches expanding each day on its own', () => {
+  const at = (day: number, hour: number) => new Date(2026, 9, day, hour);
+  const events: CalendarEvent[] = [
+    { uid: 'plain', summary: 'Plain', start: at(5, 9), end: at(5, 10), allDay: false, attendees: [] },
+    { uid: 'overnight', summary: 'Overnight', start: at(7, 22), end: at(8, 6), allDay: false, attendees: [] },
+    { uid: 'multiday', summary: 'Conference', start: at(12, 9), end: at(15, 17), allDay: false, attendees: [] },
+    { uid: 'midnight-end', summary: 'Ends at midnight', start: at(9, 20), end: new Date(2026, 9, 10, 0, 0, 0), allDay: false, attendees: [] },
+    { uid: 'zero', summary: 'Zero length', start: at(11, 8), end: at(11, 8), allDay: false, attendees: [] },
+    { uid: 'allday', summary: 'All day', start: new Date(2026, 9, 13), end: new Date(2026, 9, 14), allDay: true, attendees: [] },
+    { uid: 'weekly', summary: 'Weekly', start: new Date(2026, 8, 7, 9), end: new Date(2026, 8, 7, 10), allDay: false, attendees: [], rrule: 'FREQ=WEEKLY;COUNT=52' },
+    { uid: 'weekly-skip', summary: 'Weekly with a skip', start: new Date(2026, 8, 8, 9), end: new Date(2026, 8, 8, 10), allDay: false, attendees: [], rrule: 'FREQ=WEEKLY;COUNT=52', exceptionDates: ['20261013'] },
+    { uid: 'broken', summary: 'Unparsed rule', start: at(20, 9), end: at(20, 10), allDay: false, attendees: [], rrule: 'FREQ=WEEKLY', recurrenceError: 'unsupported' },
+  ];
+  const first = new Date(2026, 9, 1);
+  const last = new Date(2026, 9, 31);
+  const byDay = expandEventsByDay(events, first, last);
+  for (let day = 1; day <= 31; day++) {
+    const date = new Date(2026, 9, day);
+    const perDay = expandEventsForDate(events, date).map(event => `${event.uid}@${event.start.toISOString()}`);
+    const atOnce = eventsOnDay(byDay, date).map(event => `${event.uid}@${event.start.toISOString()}`);
+    expect(atOnce).toEqual(perDay);
+  }
+});
+
+test('one pass over a month is far less work than expanding cell by cell', () => {
+  const weekly = (onWalk: () => void): CalendarEvent => {
+    const event: CalendarEvent = {
+      uid: 'weekly', summary: 'Weekly', start: new Date(2026, 0, 5, 9), end: new Date(2026, 0, 5, 10),
+      allDay: false, attendees: [], rrule: 'FREQ=WEEKLY;COUNT=520',
+    };
+    // Read once per candidate the rule walk considers, so this counts work.
+    Object.defineProperty(event, 'recurrenceExceptionInstants', { get: () => { onWalk(); return undefined; } });
+    return event;
+  };
+
+  let atOnce = 0;
+  expandEventsByDay([weekly(() => { atOnce++; })], new Date(2026, 9, 1), new Date(2026, 9, 31));
+
+  let perCell = 0;
+  // A separate object, so the month cache cannot serve these calls.
+  const percellEvent = weekly(() => { perCell++; });
+  for (let day = 1; day <= 31; day++) expandEventsForDate([percellEvent], new Date(2026, 9, day));
+
+  expect(atOnce).toBeGreaterThan(0);
+  expect(atOnce).toBeLessThan(perCell);
 });
