@@ -32,7 +32,9 @@ Google Workspace administrators can disable the secret address for work or schoo
 3. Select **Apple iCloud**.
 4. Enter the Apple Account email and app-specific password.
 5. Tap **Connect & Test iCloud CalDAV**.
-6. Confirm the displayed target calendar, then use **Sync Now**.
+6. Read the result. It names the calendar new events you create will go to, how many calendars were found in the account, and how many events it read — connecting also reads your events straight away, so you do not need **Sync Now** to see them.
+
+If you have just restored a backup, synchronization is paused and connecting is refused until you tap **Allow Reconnection** on the banner (or in **Help & Setup**).
 
 SNFolio pushes local changes before pulling remote changes. Successful device testing covers event creation, editing, deletion, recurrence, remote creation/deletion, restart persistence, and duplicate prevention.
 

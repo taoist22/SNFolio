@@ -36,6 +36,22 @@ Current builds queue deletions made while a synchronized task's account is pause
 
 An imported `.ics` file is a retained snapshot. Import a newer copy to update it. For continuous updates, use a feed URL or CalDAV connection.
 
+## A note cannot be created while a PDF is open
+
+SNFolio reports that the device does not allow notes to be created or added to while a PDF is open. This applies to the day's journal, event and task notes, and adding a page to a series notebook.
+
+- Close the PDF, open any `.note`, then open SNFolio from the toolbar there and try again.
+- This is a restriction in the device's plugin system, not a setting: a plugin cannot create a note from inside the PDF reader, and SNFolio cannot work around it.
+
+## SNFolio is slow, or a sync brought in too much
+
+SNFolio keeps its data in the plugin host's storage, so **removing and reinstalling the plugin does not clear it**, and there is no cache file to delete.
+
+- **⚙ → Connections & Settings → Calendars & Sync → Remove Synced Events from SNFolio** clears the events pulled from the account and keeps the account connected. Nothing changes on the server, and **Sync Now** reads them back.
+- **Remove Calendar Account…** disconnects the account, keeping or removing its events, so nothing pulls them back.
+- **Help & Setup → Workspace Backup & Restore… → Reset SNFolio…** empties everything after saving a verified backup first. Notes, PDFs and folders are untouched.
+- A calendar with hundreds of repeating events is the heaviest case. Events, tasks and PARA items you create yourself are not what makes a device slow.
+
 ## A folder shows no files
 
 - Tap **Choose Folder**, enter the folder, and select a file inside it. Supernote does not expose a true folder-selection action.
