@@ -2169,7 +2169,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setStatusMsg(`${kind === 'archive' ? 'Imported archived' : 'Associated'} ${entry.name} with ${entry.path}.`);
   };
 
-  const handleChooseCustomTemplate = trackWorkspaceOperation(async (kind: ConfigurableNoteKind) => {
+  const handleChooseCustomTemplate = trackWorkspaceOperation(async (
+    kind: ConfigurableNoteKind,
+    want: 'png' | 'note' = 'png'
+  ) => {
     try {
       if (!RattaFileSelector || !RattaFileSelector.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -2181,9 +2184,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         // sn-pages 2026-07-12 after it broke sn-merge the same way.
         selectType: 0,
         maxNum: 1,
-        title: 'Select a .png background or a .note to copy',
+        title: want === 'note' ? 'Select a .note to copy' : 'Select a .png background',
         rightButtonText: 'Select',
-        suffixList: ['png', 'note'],
+        // Without a starting folder the selector opens with nothing to browse,
+        // which is what made this look like it had no file list at all.
+        needSelectFolder: '/storage/emulated/0',
+        suffixList: [want],
       });
       if (result && Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
         setNoteTemplate(kind, result[0]);
@@ -2193,7 +2199,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     }
   });
 
-  const handleChooseCustomTypeTemplate = trackWorkspaceOperation(async (type: EventType) => {
+  const handleChooseCustomTypeTemplate = trackWorkspaceOperation(async (
+    type: EventType,
+    want: 'png' | 'note' = 'png'
+  ) => {
     try {
       if (!RattaFileSelector?.selectFile) {
         setStatusMsg('Native file picker unavailable on this device.');
@@ -2202,9 +2211,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       const result: any = await RattaFileSelector.selectFile({
         selectType: 0,
         maxNum: 1,
-        title: `Select a .png background or a .note to copy for ${type.name}`,
+        title: want === 'note' ? `Select a .note for ${type.name}` : `Select a .png for ${type.name}`,
         rightButtonText: 'Select',
-        suffixList: ['png', 'note'],
+        needSelectFolder: '/storage/emulated/0',
+        suffixList: [want],
       });
       const path = Array.isArray(result) && typeof result[0] === 'string' ? result[0] : undefined;
       if (path) {
@@ -4920,17 +4930,32 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 })}
               </ScrollView>
 
+              {/* Two doors, not one. A single button saying "Custom PNG" gave a
+                  user hunting for a .note no reason to press it. */}
               <TouchableOpacity
                 style={styles.pickerOpenBtn}
                 onPress={() => {
                   if (typeTemplatePicker) {
-                    void handleChooseCustomTypeTemplate(typeTemplatePicker);
+                    void handleChooseCustomTypeTemplate(typeTemplatePicker, 'png');
                   } else if (templatePickerKind) {
-                    void handleChooseCustomTemplate(templatePickerKind);
+                    void handleChooseCustomTemplate(templatePickerKind, 'png');
                   }
                 }}
               >
-                <Text allowFontScaling={false} style={styles.pickerOpenBtnText}>🎨 Custom PNG...</Text>
+                <Text allowFontScaling={false} style={styles.pickerOpenBtnText}>🎨 Browse for a .png background...</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.pickerOpenBtn}
+                onPress={() => {
+                  if (typeTemplatePicker) {
+                    void handleChooseCustomTypeTemplate(typeTemplatePicker, 'note');
+                  } else if (templatePickerKind) {
+                    void handleChooseCustomTemplate(templatePickerKind, 'note');
+                  }
+                }}
+              >
+                <Text allowFontScaling={false} style={styles.pickerOpenBtnText}>📓 Browse for a .note template...</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.cancelBtn} onPress={() => {
