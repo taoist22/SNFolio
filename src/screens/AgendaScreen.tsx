@@ -58,6 +58,7 @@ import {
   SystemTemplate,
   ICON_CHOICES,
   resolveNoteDestination,
+  isNoteTemplate,
   templateLabel,
   templateSettingKey,
 } from '../domain/noteTemplates';
@@ -2180,8 +2181,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         // sn-pages 2026-07-12 after it broke sn-merge the same way.
         selectType: 0,
         maxNum: 1,
-        title: 'Select Background Template PNG',
+        title: 'Select a .png background or a .note to copy',
         rightButtonText: 'Select',
+        suffixList: ['png', 'note'],
       });
       if (result && Array.isArray(result) && result.length > 0 && typeof result[0] === 'string') {
         setNoteTemplate(kind, result[0]);
@@ -2200,9 +2202,9 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       const result: any = await RattaFileSelector.selectFile({
         selectType: 0,
         maxNum: 1,
-        title: `Select ${type.name} Background Template PNG`,
+        title: `Select a .png background or a .note to copy for ${type.name}`,
         rightButtonText: 'Select',
-        suffixList: ['png'],
+        suffixList: ['png', 'note'],
       });
       const path = Array.isArray(result) && typeof result[0] === 'string' ? result[0] : undefined;
       if (path) {
@@ -5514,6 +5516,12 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               </View>
 
               <Text allowFontScaling={false} style={[styles.sectionTitle, styles.compactSectionTitle]}>Note Templates &amp; Folders</Text>
+              <Text allowFontScaling={false} style={styles.compactHelp}>
+                Pick a .png to draw under the page, or a .note to copy whole — a notebook template
+                keeps its strokes, layers and titles. A .note stores its page size, so make it on
+                the device you use; one made on another model will not fit. Recurring notebooks
+                template their first page and continue on the default ruling.
+              </Text>
               {CONFIGURABLE_NOTE_KINDS.map(kind => {
                 const label = kind === 'daily' ? 'Daily' : kind === 'class' ? 'Class' : kind === 'task' ? 'Task' : 'Meeting';
                 const value = noteTemplateFor(kind);
@@ -5522,7 +5530,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                   <View key={kind} style={styles.compactNoteRow}>
                     <Text allowFontScaling={false} style={styles.compactNoteLabel}>{label}</Text>
                     <TouchableOpacity style={styles.compactChoice} onPress={() => setTemplatePickerKind(kind)}>
-                      <Text allowFontScaling={false} style={styles.compactChoiceText} numberOfLines={1}>🎨 {templateLabel(value)}</Text>
+                      <Text allowFontScaling={false} style={styles.compactChoiceText} numberOfLines={1}>
+                        {/* A notebook is copied whole; an image is drawn under. */}
+                        {isNoteTemplate(value) ? '📓' : '🎨'} {templateLabel(value)}
+                      </Text>
                     </TouchableOpacity>
                     <HandwritingTextInput
                       ref={input => { folderInputRefs.current[kind] = input; }}

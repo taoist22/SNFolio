@@ -4,7 +4,9 @@ import { FileUtils, PluginCommAPI, PluginFileAPI } from 'sn-plugin-lib';
 import { CalendarEvent, CalendarSettings, CalendarTask, EventType, NoteKind } from '../domain/types';
 import { generateNoteFilename, safeNoteFilename } from '../domain/meetingSnapshot';
 import {
+  appendPageTemplate,
   DEFAULT_SYSTEM_TEMPLATE,
+  isNoteTemplate,
   resolveNoteDestination,
   parseSystemTemplates,
   SystemTemplate,
@@ -73,11 +75,55 @@ export class MeetingNoteService {
    * every note fell through to a hardcoded PNG that may not even exist. The
    * built-in templates were reachable all along via their name.
    */
+  /**
+   * Duplicates a .note template into place.
+   *
+   * createNote cannot do this: its `template` is documented as a system
+   * template name or a custom template *image* path. Copying the file is what
+   * gives a template real strokes, layers and titles rather than a flat
+   * background (verified on device 2026-10-06, sn-notecopy-probe).
+   */
+  private async copyNoteTemplate(
+    notePath: string,
+    templatePath: string
+  ): Promise<{ success: boolean; usedTemplate?: string; error?: string }> {
+    try {
+      if (!FileUtils?.copyFile) {
+        return { success: false, error: 'This build cannot copy note templates.' };
+      }
+
+      // Refuse rather than overwrite. copyFile would replace the file outright,
+      // and a day's note that already has writing in it would be destroyed with
+      // no way back.
+      if (await FileUtils.exists(notePath)) {
+        return { success: false, error: 'That note already exists; it was left untouched.' };
+      }
+
+      if (!(await FileUtils.exists(templatePath))) {
+        return { success: false, error: `Template not found: ${templatePath.split('/').pop()}` };
+      }
+
+      const copied = await FileUtils.copyFile(templatePath, notePath);
+      if (copied !== true || !(await FileUtils.exists(notePath))) {
+        return { success: false, error: 'The template could not be copied.' };
+      }
+
+      return { success: true, usedTemplate: templatePath };
+    } catch (e: any) {
+      return { success: false, error: noteCreationError(e?.message || 'Copying the template failed.') };
+    }
+  }
+
   private async createNoteWithTemplate(
     notePath: string,
     templateValue: string,
     isPortrait = true
   ): Promise<{ success: boolean; usedTemplate?: string; error?: string }> {
+    // A .note is a notebook to duplicate, not a background to draw under.
+    if (isNoteTemplate(templateValue)) {
+      return this.copyNoteTemplate(notePath, templateValue.trim());
+    }
+
     const candidates = templateCandidates(templateValue, await this.getSystemTemplates());
     let lastError = 'createNote failed';
 
@@ -277,7 +323,9 @@ export class MeetingNoteService {
         const insertRes: any = await PluginFileAPI.insertNotePage({
           notePath,
           page: lastPage,
-          template: templateValue,
+          // A .note cannot furnish a page, so a recurring notebook keeps its
+          // templated first page and continues on the default ruling.
+          template: appendPageTemplate(templateValue),
         });
 
         if (!insertRes || insertRes.success !== true) {
@@ -304,7 +352,15 @@ export class MeetingNoteService {
             error: createRes.error || `Failed to create note file using template ${templateValue}.`,
           };
         }
+        // A copied .note brings its own pages — a weekly spread arrives with
+        // several — so the landing page is the last one, not page 1. Asking the
+        // device beats assuming; a template of unknown length would otherwise
+        // open on its cover every time.
         pageNum = 1;
+        if (isNoteTemplate(templateValue)) {
+          const copiedPages = notePageCount(await PluginFileAPI.getNoteTotalPageNum(notePath));
+          if (copiedPages !== undefined && copiedPages > 0) pageNum = copiedPages;
+        }
       }
 
       // Record mapping

@@ -2,7 +2,7 @@ import { meetingNoteService } from './meetingNoteService';
 import { CalendarEvent, CalendarTask } from '../domain/types';
 import { calendarStorage } from '../storage/calendarStorage';
 import { noteIdentity } from '../domain/meetingSnapshot';
-import { PluginFileAPI } from 'sn-plugin-lib';
+import { FileUtils, PluginFileAPI } from 'sn-plugin-lib';
 
 jest.mock('sn-plugin-lib', () => ({
   PluginFileAPI: {
@@ -29,6 +29,8 @@ jest.mock('sn-plugin-lib', () => ({
   FileUtils: {
     makeDir: jest.fn().mockResolvedValue(true),
     openFilePath: jest.fn().mockResolvedValue(true),
+    exists: jest.fn().mockResolvedValue(false),
+    copyFile: jest.fn().mockResolvedValue(true),
   },
   PluginManager: {
     hasPermission: jest.fn().mockResolvedValue(1),
@@ -363,4 +365,68 @@ test('the device\'s API refusal (a PDF is open) is explained instead of passed t
   expect(res.success).toBe(false);
   expect(res.error).toContain('Close the PDF, open a note');
   (PluginFileAPI.createNote as jest.Mock).mockResolvedValue({ success: true, result: true });
+});
+
+describe('a .note template is copied, not drawn under', () => {
+  const TEMPLATE = '/storage/emulated/0/Note/Templates/Daily.note';
+  const settingsWith = (dailyNoteTemplate: string) =>
+    ({ ...calendarStorage.getSettings(), dailyNoteTemplate } as any);
+  const DEST = '/storage/emulated/0/Note/Daily/2026-10-06.note';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (FileUtils.makeDir as jest.Mock).mockResolvedValue(true);
+  });
+
+  test('copies the notebook instead of calling createNote', async () => {
+    // createNote's template is a system name or a background image; a .note
+    // would be rejected, so the file is duplicated instead.
+    // Stateful, because the service checks the destination twice: absent
+    // before the copy, present after it. A flat mock would fail the second
+    // check and make a working copy look like a failure.
+    let copied = false;
+    (FileUtils.exists as jest.Mock).mockImplementation(
+      async (path: string) => path === TEMPLATE || (path === DEST && copied)
+    );
+    (FileUtils.copyFile as jest.Mock).mockImplementation(async () => {
+      copied = true;
+      return true;
+    });
+
+    const result = await meetingNoteService.createDailyNote(DEST, settingsWith(TEMPLATE));
+
+    expect(FileUtils.copyFile).toHaveBeenCalledWith(TEMPLATE, DEST);
+    expect(PluginFileAPI.createNote).not.toHaveBeenCalled();
+    expect(result.success).toBe(true);
+  });
+
+  test('refuses rather than overwriting a note that already exists', async () => {
+    // copyFile replaces the destination outright. A day's note with writing in
+    // it would be destroyed with no way back, so the copy must not happen.
+    (FileUtils.exists as jest.Mock).mockResolvedValue(true);
+
+    const result = await meetingNoteService.createDailyNote(DEST, settingsWith(TEMPLATE));
+
+    expect(FileUtils.copyFile).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
+  test('reports a missing template rather than creating an empty note', async () => {
+    (FileUtils.exists as jest.Mock).mockResolvedValue(false);
+
+    const result = await meetingNoteService.createDailyNote(DEST, settingsWith(TEMPLATE));
+
+    expect(FileUtils.copyFile).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
+  test('a png template still goes through createNote', async () => {
+    (FileUtils.exists as jest.Mock).mockResolvedValue(false);
+    (PluginFileAPI.createNote as jest.Mock).mockResolvedValue({ success: true, result: true });
+
+    await meetingNoteService.createDailyNote(DEST, settingsWith('/storage/emulated/0/MyStyle/grid.png'));
+
+    expect(PluginFileAPI.createNote).toHaveBeenCalled();
+    expect(FileUtils.copyFile).not.toHaveBeenCalled();
+  });
 });

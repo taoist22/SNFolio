@@ -1,5 +1,8 @@
 import {
+  appendPageTemplate,
   DEFAULT_SYSTEM_TEMPLATE,
+  isNoteTemplate,
+  templateKind,
   ICON_CHOICES,
   isSystemTemplate,
   parseSystemTemplates,
@@ -194,5 +197,58 @@ describe('ICON_CHOICES', () => {
     for (const risky of ['🧍', '🧑', '🏦', '🩺', '🛠️']) {
       expect(ICON_CHOICES).not.toContain(risky);
     }
+  });
+});
+
+describe('templateKind', () => {
+  test('a bare name is a built-in', () => {
+    expect(templateKind('style_8mm_ruled_line')).toBe('builtin');
+    expect(templateKind('')).toBe('builtin');
+  });
+
+  test('an absolute path to an image is a background', () => {
+    expect(templateKind('/storage/emulated/0/MyStyle/grid.png')).toBe('image');
+  });
+
+  test('an absolute path to a notebook is a note template', () => {
+    expect(templateKind('/storage/emulated/0/Note/Templates/Daily.note')).toBe('note');
+  });
+
+  test('the suffix decides regardless of case or stray spaces', () => {
+    expect(templateKind('  /Note/Daily.NOTE  ')).toBe('note');
+  });
+
+  test('a built-in whose name happens to end in note is still a built-in', () => {
+    // Only an absolute path can be a file; style_meeting_notes must not be
+    // mistaken for one.
+    expect(templateKind('style_meeting_notes')).toBe('builtin');
+    expect(isNoteTemplate('style_meeting_notes')).toBe(false);
+  });
+});
+
+describe('isSystemTemplate with note templates', () => {
+  test('a .note is not a system template', () => {
+    expect(isSystemTemplate('/Note/Templates/Daily.note')).toBe(false);
+  });
+});
+
+describe('appendPageTemplate', () => {
+  test('a .note cannot furnish a page, so the default ruling is used', () => {
+    // insertNotePage takes a name or an image, and no API merges one note into
+    // another. A recurring notebook keeps its templated first page and carries
+    // on rather than failing to append.
+    expect(appendPageTemplate('/Note/Templates/Daily.note')).toBe(DEFAULT_SYSTEM_TEMPLATE);
+  });
+
+  test('an explicit fallback is honoured', () => {
+    expect(appendPageTemplate('/Note/Templates/Daily.note', 'style_college_ruled')).toBe(
+      'style_college_ruled'
+    );
+  });
+
+  test('every other template passes through untouched', () => {
+    expect(appendPageTemplate('style_college_ruled')).toBe('style_college_ruled');
+    expect(appendPageTemplate('/MyStyle/grid.png')).toBe('/MyStyle/grid.png');
+    expect(appendPageTemplate('')).toBe('');
   });
 });

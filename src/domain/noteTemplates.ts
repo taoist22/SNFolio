@@ -24,12 +24,50 @@ export interface SystemTemplate {
 export const DEFAULT_SYSTEM_TEMPLATE = 'style_8mm_ruled_line';
 
 /**
+ * What kind of thing a template setting points at.
+ *
+ * A built-in is a bare name; anything absolute is a file. The file is a flat
+ * background image unless it is a .note, in which case it is a whole notebook
+ * to be duplicated — strokes, layers and titles included, which an image can
+ * never carry.
+ *
+ * The distinction matters because the two are made by different calls.
+ * createNote's `template` is documented as a system template name or a custom
+ * template *image* path, so a .note is not accepted there; it is copied with
+ * FileUtils.copyFile instead (verified on device 2026-10-06).
+ */
+export type TemplateKind = 'builtin' | 'image' | 'note';
+
+export function templateKind(value: string): TemplateKind {
+  const trimmed = (value || '').trim();
+  if (!trimmed.startsWith('/')) return 'builtin';
+  return trimmed.toLowerCase().endsWith('.note') ? 'note' : 'image';
+}
+
+/** True when the template is a notebook to duplicate rather than a background. */
+export function isNoteTemplate(value: string): boolean {
+  return (value || '').trim().length > 0 && templateKind(value) === 'note';
+}
+
+/**
+ * The template to use when appending a page to an existing notebook.
+ *
+ * insertNotePage takes a name or an image, and no API merges one note into
+ * another — so a .note cannot furnish page two. A recurring notebook keeps its
+ * templated first page and continues on the default ruling rather than failing
+ * to append at all.
+ */
+export function appendPageTemplate(value: string, fallback: string = DEFAULT_SYSTEM_TEMPLATE): string {
+  return isNoteTemplate(value) ? fallback : value;
+}
+
+/**
  * True when a template setting names a built-in rather than pointing at a
- * custom PNG. Custom values are absolute paths, so the leading slash decides.
+ * custom file. Custom values are absolute paths, so the leading slash decides.
  */
 export function isSystemTemplate(value: string): boolean {
   const trimmed = (value || '').trim();
-  return trimmed.length > 0 && !trimmed.startsWith('/');
+  return trimmed.length > 0 && templateKind(trimmed) === 'builtin';
 }
 
 /**
