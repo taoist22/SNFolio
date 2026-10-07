@@ -420,6 +420,43 @@ describe('a .note template is copied, not drawn under', () => {
     expect(result.success).toBe(false);
   });
 
+  test('asks for read access before touching the template', async () => {
+    // createNote reads nothing of the user's, so this service only ever held
+    // FILE:WRITE. Copying reads the template, and an unpermitted read kills
+    // the plugin outright rather than returning false.
+    const { PluginManager } = require('sn-plugin-lib');
+    (PluginManager.hasPermission as jest.Mock).mockResolvedValue(0);
+    (PluginManager.requestPermission as jest.Mock).mockResolvedValue(1);
+    let copied = false;
+    (FileUtils.exists as jest.Mock).mockImplementation(
+      async (path: string) => path === TEMPLATE || (path === DEST && copied)
+    );
+    (FileUtils.copyFile as jest.Mock).mockImplementation(async () => {
+      copied = true;
+      return true;
+    });
+
+    await meetingNoteService.createDailyNote(DEST, settingsWith(TEMPLATE));
+
+    expect(PluginManager.requestPermission).toHaveBeenCalledWith(
+      'plugin.permission.FILE:READ',
+      expect.any(String)
+    );
+  });
+
+  test('does not copy when read access is refused', async () => {
+    const { PluginManager } = require('sn-plugin-lib');
+    (PluginManager.hasPermission as jest.Mock).mockResolvedValue(0);
+    (PluginManager.requestPermission as jest.Mock).mockImplementation(
+      async (name: string) => (name === 'plugin.permission.FILE:READ' ? 0 : 1)
+    );
+
+    const result = await meetingNoteService.createDailyNote(DEST, settingsWith(TEMPLATE));
+
+    expect(FileUtils.copyFile).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+  });
+
   test('a png template still goes through createNote', async () => {
     (FileUtils.exists as jest.Mock).mockResolvedValue(false);
     (PluginFileAPI.createNote as jest.Mock).mockResolvedValue({ success: true, result: true });

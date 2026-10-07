@@ -13,7 +13,7 @@ import {
   templateCandidates,
 } from '../domain/noteTemplates';
 import { calendarStorage } from '../storage/calendarStorage';
-import { ensureFileWritePermission } from './pluginPermissions';
+import { ensureFileReadPermission, ensureFileWritePermission } from './pluginPermissions';
 
 export interface MeetingNoteResult {
   success: boolean;
@@ -90,6 +90,18 @@ export class MeetingNoteService {
     try {
       if (!FileUtils?.copyFile) {
         return { success: false, error: 'This build cannot copy note templates.' };
+      }
+
+      // Reading the template needs FILE:READ, which this service never held:
+      // createNote generates from a template name through the device's own API
+      // and reads nothing of the user's. An unpermitted file read does not
+      // return false, it kills the plugin outright — no file, no message, the
+      // panel simply gone.
+      if (!(await ensureFileReadPermission())) {
+        return { success: false, error: 'Reading the template was not allowed.' };
+      }
+      if (!(await ensureFileWritePermission())) {
+        return { success: false, error: 'File write access was not allowed.' };
       }
 
       // Refuse rather than overwrite. copyFile would replace the file outright,
