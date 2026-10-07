@@ -352,15 +352,13 @@ export class MeetingNoteService {
             error: createRes.error || `Failed to create note file using template ${templateValue}.`,
           };
         }
-        // A copied .note brings its own pages — a weekly spread arrives with
-        // several — so the landing page is the last one, not page 1. Asking the
-        // device beats assuming; a template of unknown length would otherwise
-        // open on its cover every time.
+        // Page 1, the same as any other new note. An earlier version asked the
+        // device how many pages the copy brought and landed on the last one,
+        // which was wrong twice over: a freshly copied template should open at
+        // its top, not its back page, and that count fed a page index the
+        // opener treats as zero-based — so a one-page template asked for a page
+        // that did not exist.
         pageNum = 1;
-        if (isNoteTemplate(templateValue)) {
-          const copiedPages = notePageCount(await PluginFileAPI.getNoteTotalPageNum(notePath));
-          if (copiedPages !== undefined && copiedPages > 0) pageNum = copiedPages;
-        }
       }
 
       // Record mapping
