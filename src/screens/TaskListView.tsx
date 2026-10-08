@@ -1,6 +1,6 @@
 import { isPdfPath, LinkedFileMarker } from './LinkedFileMarker';
 import React, { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Area, CalendarTask, Project } from '../domain/types';
 import { statusGlyph, taskRowLabel, taskStatus } from '../domain/taskModel';
 import {
@@ -20,15 +20,13 @@ import {
   scopeLabel,
 } from '../domain/taskListView';
 
-interface TaskListModalProps {
-  visible: boolean;
+interface TaskListViewProps {
   tasks: CalendarTask[];
   areas: Area[];
   /** Area membership by task uid; it lives outside the task itself. */
   areaOf: (uid: string) => string | undefined;
   projects: Project[];
   projectOf: (uid: string) => string | undefined;
-  onClose: () => void;
   onToggle: (task: CalendarTask) => void;
   onEdit: (task: CalendarTask) => void;
   notePathFor: (uid: string) => string | undefined;
@@ -45,20 +43,18 @@ interface TaskListModalProps {
  * redraws, so there is no search-as-you-type: you pick a scope and a grouping,
  * and the list repaints once.
  */
-export function TaskListModal({
-  visible,
+export function TaskListView({
   tasks,
   areas,
   areaOf,
   projects,
   projectOf,
-  onClose,
   onToggle,
   onEdit,
   notePathFor,
   onNoteAction,
   onLinkNote,
-}: TaskListModalProps): React.JSX.Element {
+}: TaskListViewProps): React.JSX.Element {
   const [scope, setScope] = useState<TaskScope>('open');
   const [grouping, setGrouping] = useState<TaskGrouping>('due');
   const [areaId, setAreaId] = useState<string | null>(null);
@@ -129,21 +125,11 @@ export function TaskListModal({
   })();
 
   return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.overlay}>
-        <View style={styles.sheet}>
+    <View style={styles.root}>
           <View style={styles.header}>
             <Text allowFontScaling={false} style={styles.headerTitle}>
               ☑ All Tasks ({total})
             </Text>
-            {/* Centred and named for what it opens. Tucked beside Close and
-                labelled "Areas" it read as part of the dismiss controls, and
-                said nothing about projects living there too. */}
-            <TouchableOpacity onPress={onClose}>
-              <Text allowFontScaling={false} style={styles.close}>
-                ✕ Close
-              </Text>
-            </TouchableOpacity>
           </View>
 
           <Text allowFontScaling={false} style={styles.filterLabel}>
@@ -318,28 +304,15 @@ export function TaskListModal({
               ))
             )}
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sheet: {
-    backgroundColor: '#ffffff',
-    borderWidth: 2,
-    borderColor: '#000000',
-    borderRadius: 8,
-    padding: 12,
-    width: '88%',
-    maxHeight: '86%',
-  },
+  // Fills its pane like Month and Day View. The dimmed overlay and the boxed
+  // 88%-wide sheet are what made this read as something stacked on top of the
+  // app rather than part of it.
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -350,7 +323,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   headerTitle: { fontSize: 16, fontWeight: 'bold', color: '#000000' },
-  close: { fontSize: 14, fontWeight: 'bold', color: '#000000', marginLeft: 12 },
   manageBtn: {
     borderWidth: 2,
     borderColor: '#000000',

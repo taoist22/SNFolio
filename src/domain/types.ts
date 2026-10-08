@@ -4,7 +4,7 @@ import type { EventDesignation, ProjectCategory } from './eventDesignation';
  * views rather than a modal: it sat in the view switcher but opened an
  * overlay, which is what made it feel bolted on.
  */
-export type CalendarViewMode = 'month' | 'agenda' | 'para';
+export type CalendarViewMode = 'month' | 'agenda' | 'para' | 'tasks';
 /** @deprecated Note wording is selected per event or Event Type. */
 export type ProfileThemeMode = 'business' | 'academic';
 

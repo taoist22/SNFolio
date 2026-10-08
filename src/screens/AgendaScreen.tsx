@@ -97,7 +97,7 @@ import { LASSO_BUTTON_ID, LASSO_PRESS_EVENT } from '../domain/buttonIds';
 import { parseCapturedText, resolveDateOrder, ParsedCapture } from '../domain/captureParser';
 import { captureLassoText } from '../supernote/lassoCapture';
 import { MonthGridView } from './MonthGridView';
-import { TaskListModal } from './TaskListModal';
+import { TaskListView } from './TaskListView';
 import { ParaView } from './ParaView';
 import { ProjectDetailView } from './ProjectDetailView';
 import { moveActiveProject, projectProgress } from '../domain/taskListView';
@@ -373,7 +373,6 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const [pendingDeleteNoteTask, setPendingDeleteNoteTask] = useState<CalendarTask | null>(null);
   /** Help & Setup: what a pre-0.1.24 version left queued for deletion; null until checked. */
   const [queuedNoteDeletions, setQueuedNoteDeletions] = useState<{ path: string; exists: boolean }[] | null>(null);
-  const [showTaskList, setShowTaskList] = useState<boolean>(false);
   const [areas, setAreas] = useState<Area[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);
@@ -3750,7 +3749,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   };
   const closeNoteDialogs = () => {
     setTaskNoteCreationTarget(null); setShowItemCreationModal(false);
-    setShowTaskList(false); setDetailEvent(null);
+    setDetailEvent(null);
   };
   const linkExistingNote = trackWorkspaceOperation(async (identity: string, event?: CalendarEvent) => {
     closeNoteDialogs();
@@ -4438,6 +4437,23 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 📁 PARA
               </Text>
             </TouchableOpacity>
+
+            {/* Every task in one place. It existed as an overlay with no door
+                left to open it; status and priority are only useful somewhere
+                you can see them all at once. */}
+            <TouchableOpacity
+              style={[styles.switcherBtn, viewMode === 'tasks' && styles.switcherBtnActive]}
+              onPress={() => {
+                setViewMode('tasks');
+                setShowSettings(false);
+              }}
+            >
+              <Text allowFontScaling={false}
+                style={[styles.switcherBtnText, viewMode === 'tasks' && styles.switcherBtnTextActive]}
+              >
+                ☑ Tasks
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -4783,30 +4799,6 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
         </TouchableOpacity>
       </Modal>
 
-      <TaskListModal
-        visible={showTaskList}
-        tasks={tasks}
-        areas={areas}
-        areaOf={areaOfTask}
-        projects={projects}
-        projectOf={projectOfTask}
-        onClose={() => setShowTaskList(false)}
-        onToggle={handleToggleTask}
-        onEdit={task => {
-          setShowTaskList(false);
-          handleEditTask(task);
-        }}
-        onLinkNote={task => { void handleLinkExistingTaskNote(task); }}
-        notePathFor={uid => calendarStorage.getMapping(uid)?.notePath}
-        onNoteAction={(task, existingPath) => {
-          setShowTaskList(false);
-          if (existingPath) {
-            void handleOpenExistingNote(existingPath);
-          } else {
-            handleRequestTaskNote(task);
-          }
-        }}
-      />
 
       {noteCreationEvent && (
         <CreateEventNoteModal
@@ -6106,6 +6098,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
           {/* Equal-weight side groups so the date sits optically centred.
               Previously Prev on the left and Today+Next on the right were
               different widths, pushing the heading off-centre. */}
+          {viewMode !== 'tasks' && (
           <View style={styles.dateNavRow}>
             <View style={styles.dateNavSide}>
               <TouchableOpacity style={styles.navBtn} onPress={handlePrevDay}>
@@ -6131,6 +6124,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               </TouchableOpacity>
             </View>
           </View>
+          )}
 
           {/* Recurring Deletion Modal */}
           <Modal visible={showDeleteModal} transparent animationType="fade">
@@ -6565,6 +6559,29 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               onMoveProject={handleMoveProject}
               onAddExistingFolder={kind => setExistingFolderKind(kind)}
               onMoveFile={handleMoveParaFile}
+            />
+          )}
+
+          {/* A peer of the other views, with the switcher as the way out —
+              the overlay it used to be is what made it feel bolted on. */}
+          {viewMode === 'tasks' && (
+            <TaskListView
+              tasks={tasks}
+              areas={areas}
+              areaOf={areaOfTask}
+              projects={projects}
+              projectOf={projectOfTask}
+              onToggle={handleToggleTask}
+              onEdit={handleEditTask}
+              onLinkNote={task => { void handleLinkExistingTaskNote(task); }}
+              notePathFor={uid => calendarStorage.getMapping(uid)?.notePath}
+              onNoteAction={(task, existingPath) => {
+                if (existingPath) {
+                  void handleOpenExistingNote(existingPath);
+                } else {
+                  handleRequestTaskNote(task);
+                }
+              }}
             />
           )}
 
