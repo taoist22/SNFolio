@@ -19,7 +19,7 @@ const COLLECTION = 'https://p01-caldav.icloud.com/123456789/calendars/work/';
 function makeEvent(over: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
     uid: 'evt-1',
-    summary: 'Maikai Health',
+    summary: 'Dentist',
     start: new Date('2026-08-18T20:20:00Z'),
     end: new Date('2026-08-18T21:20:00Z'),
     allDay: false,
@@ -43,7 +43,7 @@ describe('CalDAV push state', () => {
   });
 
   test.each([
-    ['summary', { summary: 'Maikai Health — rescheduled' }],
+    ['summary', { summary: 'Dentist — rescheduled' }],
     ['start time', { start: new Date('2026-08-18T22:20:00Z') }],
     ['end time', { end: new Date('2026-08-18T23:00:00Z') }],
     ['all-day flag', { allDay: true }],

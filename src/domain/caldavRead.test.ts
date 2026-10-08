@@ -24,7 +24,7 @@ describe('CalDAV read path (calendar-query REPORT)', () => {
       const ics = extractCalendarData(first) as string;
 
       expect(ics.startsWith('BEGIN:VCALENDAR')).toBe(true);
-      expect(ics).toContain('SUMMARY:Maikai Health');
+      expect(ics).toContain('SUMMARY:Dentist');
       // The CDATA markers themselves must not survive into the payload.
       expect(ics).not.toContain('CDATA');
       expect(ics).not.toContain(']]>');
@@ -109,7 +109,7 @@ END:VCALENDAR</calendar-data></response>`.replace(/&#13;\n/g, '\n');
       );
 
       expect(error).toBeUndefined();
-      expect(events.map(e => e.summary)).toEqual(['Maikai Health', '[TASK] Call advisor']);
+      expect(events.map(e => e.summary)).toEqual(['Dentist', '[TASK] Call the bank']);
       expect(events[0].uid).toBe('66666666-7777-4888-8999-AAAAAAAAAAAA');
       expect(events[0].calendarName).toBe('iCloud');
     });
