@@ -256,11 +256,38 @@ export async function deleteFileWithCompanions(path: string): Promise<ExportResu
   if (!CalendarFile?.deleteFile) {
     return { success: false, message: 'Cannot delete files — this build is missing its native module.' };
   }
+  // Native first, because it has no side effect. FileUtils.deleteFile works
+  // but navigates the NOTE app to the containing folder, so it is the fallback
+  // rather than the first choice — and the reason the native attempt failed is
+  // reported either way, since a silent delete that does nothing is worse than
+  // a loud one that does.
+  let nativeError = '';
   try {
-    await CalendarFile.deleteFile(path);
+    const ok = await CalendarFile.deleteFile(path);
+    if (ok === false) nativeError = 'the device refused it';
   } catch (e: any) {
-    return { success: false, path, message: `Could not delete: ${e?.message || 'delete failed'}` };
+    nativeError = e?.message || 'delete failed';
   }
+
+  if (nativeError) {
+    if (!FileUtils.deleteFile) {
+      return { success: false, path, message: `Could not delete: ${nativeError}` };
+    }
+    try {
+      if (!(await FileUtils.deleteFile(path))) {
+        return { success: false, path, message: `Could not delete: ${nativeError}` };
+      }
+    } catch (e: any) {
+      return {
+        success: false,
+        path,
+        message: `Could not delete: ${nativeError}; fallback also failed: ${e?.message || 'refused'}`,
+      };
+    }
+  }
+
+  // Deleted, but say how: the fallback moves the NOTE app to this folder.
+  const viaFallback = Boolean(nativeError);
   for (const companion of companionPaths(path)) {
     try {
       await CalendarFile.deleteFile(companion);
@@ -268,7 +295,13 @@ export async function deleteFileWithCompanions(path: string): Promise<ExportResu
       // A missing or locked sidecar must not strand the caller: the note is gone.
     }
   }
-  return { success: true, path, message: `Deleted ${path.split('/').pop()}` };
+  return {
+    success: true,
+    path,
+    message: viaFallback
+      ? `Deleted ${path.split('/').pop()} (via the fallback: ${nativeError})`
+      : `Deleted ${path.split('/').pop()}`,
+  };
 }
 
 /**

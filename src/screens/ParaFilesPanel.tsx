@@ -314,6 +314,9 @@ export function ParaFilesPanel({
           <Text allowFontScaling={false} style={styles.hint}>
             Rename {entry.name}. Its annotations follow it; links inside other notes do not.
           </Text>
+          {Boolean(moveMessage) && (
+            <Text allowFontScaling={false} style={styles.error}>{moveMessage}</Text>
+          )}
           <View style={styles.newRow}>
             <HandwritingTextInput
               style={styles.input}
@@ -326,10 +329,13 @@ export function ParaFilesPanel({
             <TouchableOpacity style={styles.button} onPress={async () => {
               const next = renameTo.trim();
               if (!next) return;
+              setMoveMessage('');
               try {
+                const source = parentFolder(entry.path);
                 await onRenameFile(entry.path, next);
                 setRenaming(null);
                 await refresh(viewFolder);
+                if (source && open[source]) await loadSection(source);
               } catch (e: any) {
                 setMoveMessage(e?.message || 'Could not rename it.');
               }
@@ -351,12 +357,18 @@ export function ParaFilesPanel({
             Delete {entry.name}? Its annotations go with it. This cannot be undone, and any
             SNFolio item linked to it will lose that link.
           </Text>
+          {Boolean(moveMessage) && (
+            <Text allowFontScaling={false} style={styles.error}>{moveMessage}</Text>
+          )}
           <View style={styles.newRow}>
             <TouchableOpacity style={styles.button} onPress={async () => {
+              setMoveMessage('');
               try {
+                const source = parentFolder(entry.path);
                 await onDeleteFile(entry.path);
                 setConfirmingDelete(null);
                 await refresh(viewFolder);
+                if (source && open[source]) await loadSection(source);
               } catch (e: any) {
                 setMoveMessage(e?.message || 'Could not delete it.');
               }
