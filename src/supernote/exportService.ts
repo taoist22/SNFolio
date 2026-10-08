@@ -250,6 +250,13 @@ export async function listParaFolderEntries(folder: string): Promise<ParaFolderE
  * but the note itself failing stops everything.
  */
 export async function deleteFileWithCompanions(path: string): Promise<ExportResult> {
+  // DELETE is its own permission, and declaring it in PluginConfig only makes
+  // it requestable. PluginHost polices file operations itself — even plain
+  // java.io.File calls inside a native module — and answers an unheld one with
+  // "Plugin [id] has no DELETE permission for: <path>".
+  if (!(await ensureFileDeletePermission())) {
+    return { success: false, path, message: 'Deleting files was not allowed.' };
+  }
   if (!(await ensureFileWritePermission())) {
     return { success: false, path, message: 'File access was not allowed.' };
   }
