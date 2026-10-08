@@ -105,7 +105,11 @@ interface ProjectDetailViewProps {
   onDelete: () => void;
   folder: string;
   onListEntries: (folder: string) => Promise<ParaFolderEntry[]>;
-  onNewNote: (name: string, folder: string) => Promise<void>;
+  onNewNote: (name: string, folder: string, noteKind: 'class' | 'meeting') => Promise<void>;
+  /** Prefills the Class/Meeting toggle from the project's own designation. */
+  defaultNoteKind?: 'class' | 'meeting';
+  onRenameFile?: (path: string, newName: string) => Promise<void>;
+  onDeleteFile?: (path: string) => Promise<void>;
   onChooseFolder: (folder: string) => Promise<void>;
   onOpenFile: (path: string) => void;
   onOpenNote: (path: string) => void;
@@ -151,6 +155,9 @@ export function ProjectDetailView({
   folder,
   onListEntries,
   onNewNote,
+  defaultNoteKind,
+  onRenameFile,
+  onDeleteFile,
   onChooseFolder,
   onOpenFile,
   onOpenNote,
@@ -370,6 +377,9 @@ export function ProjectDetailView({
         onListEntries={onListEntries}
         onOpenFile={onOpenFile}
         onNewNote={onNewNote}
+        defaultNoteKind={defaultNoteKind}
+        onRenameFile={onRenameFile}
+        onDeleteFile={onDeleteFile}
         onChooseFolder={onChooseFolder}
       />
 

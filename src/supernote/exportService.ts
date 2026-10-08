@@ -9,6 +9,7 @@ import {
 type CalendarFileModule = {
   writeTextFile(path: string, content: string): Promise<string>;
   openNote(path: string, page: number): Promise<boolean>;
+  deleteFile(path: string): Promise<boolean>;
   openDocument(path: string): Promise<boolean>;
   listNoteFiles(path: string): Promise<string[]>;
   listFolderEntries(path: string): Promise<ParaFolderEntry[]>;
@@ -236,6 +237,91 @@ export async function listParaFolderEntries(folder: string): Promise<ParaFolderE
   } catch (e) {
     return [];
   }
+}
+
+/**
+ * Deletes a file and its companions.
+ *
+ * Goes through the native module rather than PluginFileAPI.deleteFile, which
+ * navigates the NOTE app to the containing folder — fine when a navigation was
+ * coming anyway, wrong when the user is standing in a file list.
+ *
+ * Companions are best effort: a note whose .mark is missing is still deleted,
+ * but the note itself failing stops everything.
+ */
+export async function deleteFileWithCompanions(path: string): Promise<ExportResult> {
+  if (!(await ensureFileWritePermission())) {
+    return { success: false, path, message: 'File access was not allowed.' };
+  }
+  if (!CalendarFile?.deleteFile) {
+    return { success: false, message: 'Cannot delete files — this build is missing its native module.' };
+  }
+  try {
+    await CalendarFile.deleteFile(path);
+  } catch (e: any) {
+    return { success: false, path, message: `Could not delete: ${e?.message || 'delete failed'}` };
+  }
+  for (const companion of companionPaths(path)) {
+    try {
+      await CalendarFile.deleteFile(companion);
+    } catch (e) {
+      // A missing or locked sidecar must not strand the caller: the note is gone.
+    }
+  }
+  return { success: true, path, message: `Deleted ${path.split('/').pop()}` };
+}
+
+/**
+ * Renames a file in place, with its companions.
+ *
+ * renameToFile is the same call moveFileToFolder relies on; only the target
+ * name differs. Nothing is overwritten.
+ */
+export async function renameFileInPlace(path: string, newName: string): Promise<ExportResult> {
+  if (!(await ensureFileWritePermission())) {
+    return { success: false, path, message: 'File access was not allowed.' };
+  }
+  if (!FileUtils.renameToFile || !FileUtils.exists) {
+    return { success: false, message: 'Renaming is unavailable in this build.' };
+  }
+
+  const slash = path.lastIndexOf('/');
+  const dir = path.slice(0, slash);
+  const oldName = path.slice(slash + 1);
+  const dot = oldName.lastIndexOf('.');
+  const extension = dot > 0 ? oldName.slice(dot) : '';
+  const safe = safeFileName(newName.replace(new RegExp(`\\${extension}$`, 'i'), ''));
+  if (!safe) return { success: false, path, message: 'Enter a name.' };
+
+  const destination = `${dir}/${safe}${extension}`;
+  if (destination === path) return { success: true, path, message: 'Name unchanged.' };
+
+  try {
+    if (await FileUtils.exists(destination)) {
+      return { success: false, path, message: `${safe}${extension} already exists here.` };
+    }
+    if (!(await FileUtils.renameToFile(path, destination))) {
+      return { success: false, path, message: 'The device refused the rename.' };
+    }
+  } catch (e: any) {
+    return { success: false, path, message: `Could not rename: ${e?.message || 'rename failed'}` };
+  }
+
+  // Sidecars follow the stem, so they are renamed to match or the annotations
+  // stop belonging to the note.
+  const oldCompanions = companionPaths(path);
+  const newCompanions = companionPaths(destination);
+  for (let index = 0; index < oldCompanions.length; index++) {
+    try {
+      if (await FileUtils.exists(oldCompanions[index])) {
+        await FileUtils.renameToFile(oldCompanions[index], newCompanions[index]);
+      }
+    } catch (e) {
+      // Best effort, as in moveFileToFolder.
+    }
+  }
+
+  return { success: true, path: destination, message: `Renamed to ${safe}${extension}` };
 }
 
 /**

@@ -1,4 +1,4 @@
-import { EventDesignation, resolveEventDesignation, resolveTaskDesignation } from '../domain/eventDesignation';
+import { EventDesignation, projectEventDesignation, resolveEventDesignation, resolveTaskDesignation } from '../domain/eventDesignation';
 import { classWeekCount, classWeekStartDay, LinkedFileEntry, weekFolderForDate, weekFolderName } from '../domain/linkedFileWeeks';
 import { LinkedFileMarker, LinkedFilePathsContext, EventDesignationsContext } from './LinkedFileMarker';
 import { useWorkspaceActivity } from './useWorkspaceActivity';
@@ -146,7 +146,7 @@ import { hourLabel } from '../domain/dayGrid';
 import { ItemCreationModal } from './ItemCreationModal';
 import { EventDetailsModal } from './EventDetailsModal';
 import { DatePickerModal } from './DatePickerModal';
-import { listParaFolderEntries, moveFileToFolder, moveParaFolder, openNoteInEditor, openResourceFile, ParaFolderEntry } from '../supernote/exportService';
+import { deleteFileWithCompanions, listParaFolderEntries, moveFileToFolder, moveParaFolder, openNoteInEditor, openResourceFile, ParaFolderEntry, renameFileInPlace } from '../supernote/exportService';
 import {
   ensureFileReadPermission,
   ensureInternetPermission,
@@ -3888,7 +3888,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     kind: ParaFolderKind,
     item: ParaFolderItem,
     noteName: string,
-    targetFolder?: string
+    targetFolder?: string,
+    noteKind: 'class' | 'meeting' = 'meeting'
   ) => {
     const settings = calendarStorage.getSettings();
     const folder = targetFolder || paraFolder(kind, item);
@@ -3905,10 +3906,16 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     } catch (e) {
       // Let createNote report the authoritative device result.
     }
+    // The kind decides the template. This used to fall back to meetingTemplate
+    // unconditionally, so a note made inside a class project came out looking
+    // like a meeting note however the project was classified.
+    const kindTemplate = noteKind === 'class'
+      ? settings.classTemplate || settings.meetingTemplate || ''
+      : settings.meetingTemplate || '';
     const result = await meetingNoteService.createProjectNote(
       safeNoteName,
       folder,
-      item.template || settings.meetingTemplate || ''
+      item.template || kindTemplate
     );
     if (!result.success || !result.notePath) {
       setStatusMsg(`Could not create the note: ${result.error || 'unknown error'}`);
@@ -3928,6 +3935,52 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    * .sdr companions, then points every SNFolio link at the new path. Rejects
    * with a message the caller shows beside the file.
    */
+  /** Rename in place, keeping SNFolio's links pointing at the file. */
+  const handleRenameParaFile = async (path: string, newName: string): Promise<void> => {
+    const name = path.split('/').pop() || path;
+    try {
+      const current = (await PluginCommAPI.getCurrentFilePath() as { result?: unknown } | null)?.result;
+      if (current === path) throw new Error(`${name} is the note open behind SNFolio. Open a different note, then rename it.`);
+    } catch (e: any) {
+      if (e?.message?.includes('open behind SNFolio')) throw e;
+    }
+    const result = await renameFileInPlace(path, newName);
+    if (!result.success || !result.path) throw new Error(result.message);
+    calendarStorage.rewritePathPrefix(path, result.path);
+    setEventNotePaths(current => Object.fromEntries(
+      Object.entries(current).map(([key, value]) => [key, value === path ? result.path! : value])
+    ));
+    setMembershipRevision(value => value + 1);
+    void calendarStorage.flush();
+    setStatusMsg(result.message);
+  };
+
+  /**
+   * Deletes a file from a PARA folder.
+   *
+   * Goes through the native module, not PluginFileAPI.deleteFile, which would
+   * navigate the NOTE app away from the list the user is standing in.
+   */
+  const handleDeleteParaFile = async (path: string): Promise<void> => {
+    const name = path.split('/').pop() || path;
+    try {
+      const current = (await PluginCommAPI.getCurrentFilePath() as { result?: unknown } | null)?.result;
+      if (current === path) throw new Error(`${name} is the note open behind SNFolio. Open a different note, then delete it.`);
+    } catch (e: any) {
+      if (e?.message?.includes('open behind SNFolio')) throw e;
+    }
+    const result = await deleteFileWithCompanions(path);
+    if (!result.success) throw new Error(result.message);
+    // The file is gone, so anything still pointing at it is a dead link.
+    calendarStorage.forgetPath(path);
+    setEventNotePaths(current => Object.fromEntries(
+      Object.entries(current).filter(([, value]) => value !== path)
+    ));
+    setMembershipRevision(value => value + 1);
+    void calendarStorage.flush();
+    setStatusMsg(result.message);
+  };
+
   const handleMoveParaFile = async (path: string, destinationFolder: string): Promise<void> => {
     const name = path.split('/').pop() || path;
     try {
@@ -6476,7 +6529,10 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               }}
               folder={paraFolder('project', openProject)}
               onListEntries={folder => handleListParaEntries('project', openProject, folder)}
-              onNewNote={(name, folder) => handleNewParaNote('project', openProject, name, folder)}
+              onNewNote={(name, folder, noteKind) => handleNewParaNote('project', openProject, name, folder, noteKind)}
+              defaultNoteKind={projectEventDesignation(openProject) === 'class' ? 'class' : 'meeting'}
+              onRenameFile={handleRenameParaFile}
+              onDeleteFile={handleDeleteParaFile}
               onChooseFolder={folder => handleChooseParaFolder('project', openProject, folder)}
               onOpenFile={path => void handleOpenResourceFile(path)}
               onOpenNote={path => void handleOpenExistingNote(path)}
@@ -6535,6 +6591,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               onListEntries={handleListParaEntries}
               onOpenFile={path => void handleOpenResourceFile(path)}
               onNewNote={handleNewParaNote}
+              onRenameFile={handleRenameParaFile}
+              onDeleteFile={handleDeleteParaFile}
               onChooseFolder={handleChooseParaFolder}
               onUpdateResource={resource => {
                 calendarStorage.upsertResource(resource);

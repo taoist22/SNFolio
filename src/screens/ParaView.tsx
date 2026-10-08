@@ -5,6 +5,7 @@ import React from 'react';
 import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Area, CalendarEvent, CalendarTask, Project, Resource } from '../domain/types';
 import { isDone, statusGlyph, taskStatus } from '../domain/taskModel';
+import { projectEventDesignation } from '../domain/eventDesignation';
 import { ICON_CHOICES } from '../domain/noteTemplates';
 import { ParaFilesPanel } from './ParaFilesPanel';
 import { ParaFolderEntry } from '../supernote/exportService';
@@ -52,7 +53,9 @@ interface ParaViewProps {
   folderFor: (kind: 'project' | 'area' | 'resource', item: Project | Area | Resource) => string;
   onListEntries: (kind: 'project' | 'area' | 'resource', item: Project | Area | Resource, folder: string) => Promise<ParaFolderEntry[]>;
   onOpenFile: (path: string) => void;
-  onNewNote: (kind: 'project' | 'area' | 'resource', item: Project | Area | Resource, name: string, folder: string) => Promise<void>;
+  onNewNote: (kind: 'project' | 'area' | 'resource', item: Project | Area | Resource, name: string, folder: string, noteKind: 'class' | 'meeting') => Promise<void>;
+  onRenameFile?: (path: string, newName: string) => Promise<void>;
+  onDeleteFile?: (path: string) => Promise<void>;
   onChooseFolder: (kind: 'project' | 'area' | 'resource', item: Project | Area | Resource, folder: string) => Promise<void>;
   onUpdateResource: (resource: Resource) => void;
   onArchiveResource: (resource: Resource) => void;
@@ -112,6 +115,8 @@ export function ParaView({
   onListEntries,
   onOpenFile,
   onNewNote,
+  onRenameFile,
+  onDeleteFile,
   onChooseFolder,
   onUpdateResource,
   onArchiveResource,
@@ -654,7 +659,9 @@ export function ParaView({
                       folder={folderFor('area', selectedArea)}
                       onListEntries={folder => onListEntries('area', selectedArea, folder)}
                       onOpenFile={onOpenFile}
-                      onNewNote={(name, folder) => onNewNote('area', selectedArea, name, folder)}
+                      onNewNote={(name, folder, noteKind) => onNewNote('area', selectedArea, name, folder, noteKind)}
+                      onRenameFile={onRenameFile}
+                      onDeleteFile={onDeleteFile}
                       onChooseFolder={folder => onChooseFolder('area', selectedArea, folder)}
                       onMoveFile={onMoveFile}
                     />
@@ -900,7 +907,10 @@ export function ParaView({
                           folder={folderFor('project', project)}
                           onListEntries={folder => onListEntries('project', project, folder)}
                           onOpenFile={onOpenFile}
-                          onNewNote={(name, folder) => onNewNote('project', project, name, folder)}
+                          onNewNote={(name, folder, noteKind) => onNewNote('project', project, name, folder, noteKind)}
+                          defaultNoteKind={projectEventDesignation(project) === 'class' ? 'class' : 'meeting'}
+                          onRenameFile={onRenameFile}
+                          onDeleteFile={onDeleteFile}
                           onChooseFolder={folder => onChooseFolder('project', project, folder)}
                           onMoveFile={onMoveFile}
                         />
@@ -1018,7 +1028,9 @@ export function ParaView({
                   folder={folderFor('resource', resource)}
                   onListEntries={folder => onListEntries('resource', resource, folder)}
                   onOpenFile={onOpenFile}
-                  onNewNote={(name, folder) => onNewNote('resource', resource, name, folder)}
+                  onNewNote={(name, folder, noteKind) => onNewNote('resource', resource, name, folder, noteKind)}
+                  onRenameFile={onRenameFile}
+                  onDeleteFile={onDeleteFile}
                   onChooseFolder={folder => onChooseFolder('resource', resource, folder)}
                   onMoveFile={onMoveFile}
                 />

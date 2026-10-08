@@ -676,6 +676,27 @@ export class CalendarStorage {
    * Native Supernote links and other apps' records are intentionally outside
    * this store and are covered by the warning shown before a move.
    */
+  /**
+   * Drops every reference to a path whose file no longer exists.
+   *
+   * rewritePathPrefix has somewhere to point at; a deletion does not, and a
+   * mapping left behind would offer "Open Note" on a note that is gone.
+   */
+  forgetPath(path: string): void {
+    const target = path.replace(/\/+$/, '');
+    if (!target) return;
+    let changed = false;
+    this.mappings = Object.fromEntries(
+      Object.entries(this.mappings).filter(([, mapping]) => {
+        const hit = mapping?.notePath === target;
+        if (hit) changed = true;
+        return !hit;
+      })
+    );
+    this.pendingDeletes = this.pendingDeletes.filter(queued => queued !== target);
+    if (changed) void this.save();
+  }
+
   rewritePathPrefix(fromPath: string, toPath: string): void {
     const from = fromPath.replace(/\/+$/, '');
     const to = toPath.replace(/\/+$/, '');

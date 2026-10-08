@@ -408,6 +408,49 @@ public class CalendarFileModule extends ReactContextBaseJavaModule {
      * and much harder to recover safely on an e-ink device.
      */
     @ReactMethod
+    /**
+     * Deletes one file.
+     *
+     * PluginFileAPI.deleteFile navigates the NOTE app to the containing folder,
+     * which is tolerable when a navigation was going to happen anyway and wrong
+     * when the user is standing in a file list. java.io.File has no such side
+     * effect.
+     *
+     * Only files, only inside user storage, never a directory — removing a tree
+     * by accident is not recoverable here.
+     */
+    public void deleteFile(String filePath, Promise promise) {
+        if (TextUtils.isEmpty(filePath)) {
+            promise.reject("E_PATH", "A file path is required");
+            return;
+        }
+        try {
+            File target = new File(filePath).getCanonicalFile();
+            String canonical = target.getPath();
+            if (!canonical.startsWith("/storage/")) {
+                promise.reject("E_PATH", "Files must be inside user storage");
+                return;
+            }
+            if (!target.exists()) {
+                // Already gone is the state the caller wanted.
+                promise.resolve(true);
+                return;
+            }
+            if (target.isDirectory()) {
+                promise.reject("E_IS_DIR", "Refusing to delete a folder");
+                return;
+            }
+            if (!target.delete()) {
+                promise.reject("E_DELETE", "The device refused to delete " + target.getName());
+                return;
+            }
+            promise.resolve(true);
+        } catch (Throwable error) {
+            promise.reject("E_DELETE", error.getMessage(), error);
+        }
+    }
+
+    @ReactMethod
     public void moveFolder(String sourcePath, String destinationPath, Promise promise) {
         if (TextUtils.isEmpty(sourcePath) || TextUtils.isEmpty(destinationPath)) {
             promise.reject("E_PATH", "Both source and destination folders are required");

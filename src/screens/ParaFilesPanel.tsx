@@ -9,7 +9,11 @@ interface ParaFilesPanelProps {
   folder: string;
   onListEntries: (folder: string) => Promise<ParaFolderEntry[]>;
   onOpenFile: (path: string) => void;
-  onNewNote: (name: string, folder: string) => Promise<void>;
+  onNewNote: (name: string, folder: string, noteKind: 'class' | 'meeting') => Promise<void>;
+  /** What a new note here should be unless the user says otherwise. */
+  defaultNoteKind?: 'class' | 'meeting';
+  onRenameFile?: (path: string, newName: string) => Promise<void>;
+  onDeleteFile?: (path: string) => Promise<void>;
   onChooseFolder: (folder: string) => Promise<void>;
   /**
    * A subfolder that is "now", such as this week's folder in a class. Its
@@ -50,6 +54,9 @@ export function ParaFilesPanel({
   onListEntries,
   onOpenFile,
   onNewNote,
+  defaultNoteKind = 'meeting',
+  onRenameFile,
+  onDeleteFile,
   onChooseFolder,
   currentSubfolder,
   onMoveFile,
@@ -199,6 +206,13 @@ export function ParaFilesPanel({
     }
   };
 
+  const [renaming, setRenaming] = React.useState<string | null>(null);
+  const [renameTo, setRenameTo] = React.useState<string>('');
+  const [confirmingDelete, setConfirmingDelete] = React.useState<string | null>(null);
+  const [noteKind, setNoteKind] = React.useState<'class' | 'meeting'>(defaultNoteKind);
+  // Follows the project until the user overrides it for this note.
+  React.useEffect(() => { setNoteKind(defaultNoteKind); }, [defaultNoteKind]);
+
   const noteForm = (target: string) => (
     <View style={styles.newRow}>
       <HandwritingTextInput
@@ -210,10 +224,28 @@ export function ParaFilesPanel({
         placeholderTextColor="#707070"
         autoCorrect={false}
       />
+      {/* Prefilled from the project's own designation, so a class project
+          offers Class without being asked. A one-off meeting inside a class
+          is still one tap away. */}
+      {(['class', 'meeting'] as const).map(value => (
+        <TouchableOpacity
+          key={value}
+          style={[styles.button, noteKind === value && styles.buttonOn]}
+          accessibilityRole="button"
+          accessibilityState={{ selected: noteKind === value }}
+          onPress={() => setNoteKind(value)}
+        >
+          <Text allowFontScaling={false}
+            style={[styles.buttonText, noteKind === value && styles.buttonTextOn]}
+          >
+            {value === 'class' ? '🎓 Class' : '🏢 Meeting'}
+          </Text>
+        </TouchableOpacity>
+      ))}
       <TouchableOpacity style={styles.button} onPress={async () => {
         const name = (noteNameInputRef.current?.getValue() ?? noteName).trim();
         if (name) {
-          await onNewNote(name, target);
+          await onNewNote(name, target, noteKind);
           if (sections[target] || open[target]) await loadSection(target);
           await refresh(viewFolder);
         }
@@ -254,7 +286,91 @@ export function ParaFilesPanel({
             <Text allowFontScaling={false} style={styles.openText}>Move…</Text>
           </TouchableOpacity>
         )}
+        {!entry.isFolder && onRenameFile && !choosing && (
+          <TouchableOpacity style={styles.moveButton} onPress={() => {
+            setMoveMessage('');
+            setMoving(null);
+            setConfirmingDelete(null);
+            setRenaming(renaming === entry.path ? null : entry.path);
+            setRenameTo(entry.name.replace(/\.[^.]+$/, ''));
+          }}>
+            <Text allowFontScaling={false} style={styles.openText}>Rename…</Text>
+          </TouchableOpacity>
+        )}
+        {!entry.isFolder && onDeleteFile && !choosing && (
+          <TouchableOpacity style={styles.moveButton} onPress={() => {
+            setMoveMessage('');
+            setMoving(null);
+            setRenaming(null);
+            setConfirmingDelete(confirmingDelete === entry.path ? null : entry.path);
+          }}>
+            <Text allowFontScaling={false} style={styles.openText}>Delete…</Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {renaming === entry.path && onRenameFile && (
+        <View style={[styles.moveBox, indent && styles.indented]}>
+          <Text allowFontScaling={false} style={styles.hint}>
+            Rename {entry.name}. Its annotations follow it; links inside other notes do not.
+          </Text>
+          <View style={styles.newRow}>
+            <HandwritingTextInput
+              style={styles.input}
+              value={renameTo}
+              onChangeText={setRenameTo}
+              placeholder="New name"
+              placeholderTextColor="#707070"
+              autoCorrect={false}
+            />
+            <TouchableOpacity style={styles.button} onPress={async () => {
+              const next = renameTo.trim();
+              if (!next) return;
+              try {
+                await onRenameFile(entry.path, next);
+                setRenaming(null);
+                await refresh(viewFolder);
+              } catch (e: any) {
+                setMoveMessage(e?.message || 'Could not rename it.');
+              }
+            }}>
+              <Text allowFontScaling={false} style={styles.buttonText}>Rename</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={() => setRenaming(null)}>
+              <Text allowFontScaling={false} style={styles.buttonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Confirmed on the row, as areas and projects are, so the thing being
+          deleted stays in front of you while you decide. */}
+      {confirmingDelete === entry.path && onDeleteFile && (
+        <View style={[styles.moveBox, indent && styles.indented]}>
+          <Text allowFontScaling={false} style={styles.hint}>
+            Delete {entry.name}? Its annotations go with it. This cannot be undone, and any
+            SNFolio item linked to it will lose that link.
+          </Text>
+          <View style={styles.newRow}>
+            <TouchableOpacity style={styles.button} onPress={async () => {
+              try {
+                await onDeleteFile(entry.path);
+                setConfirmingDelete(null);
+                await refresh(viewFolder);
+              } catch (e: any) {
+                setMoveMessage(e?.message || 'Could not delete it.');
+              }
+            }}>
+              {/* Named apart from the row's "Delete…" so the one that acts and
+                  the one that asks are never the same word on screen. */}
+              <Text allowFontScaling={false} style={styles.buttonText}>Delete it</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.button} onPress={() => setConfirmingDelete(null)}>
+              <Text allowFontScaling={false} style={styles.buttonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
       {moving === entry.path && (
         <View style={[styles.moveBox, indent && styles.indented]}>
           <Text allowFontScaling={false} style={styles.hint}>
@@ -417,6 +533,8 @@ const styles = StyleSheet.create({
     marginRight: 5,
     marginBottom: 4,
   },
+  buttonOn: { backgroundColor: '#000000' },
+  buttonTextOn: { color: '#ffffff' },
   buttonText: { fontSize: 11, fontWeight: 'bold', color: '#000000' },
   primaryButton: {
     backgroundColor: '#000000',

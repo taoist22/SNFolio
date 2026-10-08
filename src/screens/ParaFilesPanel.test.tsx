@@ -5,6 +5,8 @@ import { ParaFilesPanel } from './ParaFilesPanel';
 import { useWorkspaceActivity } from './useWorkspaceActivity';
 
 jest.mock('./HandwritingTextInput', () => ({ HandwritingTextInput: () => null }));
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { HandwritingTextInput } = require('./HandwritingTextInput');
 const props = { itemKey: 'project:a', folder: '/A', onOpenFile: jest.fn(),
   onNewNote: jest.fn(), onChooseFolder: jest.fn() };
 const entry = (name: string) => ({ name, path: `/A/${name}`, isFolder: false });
@@ -170,5 +172,103 @@ test('linked files show 🔗 and what they are linked to; other files do not', a
   expect(text).toContain('Lecture 5.note  🔗');
   expect(text).toContain('↳ Research Methods (Sep 23)');
   expect(text).toContain('|Scratch.note|');
+  act(() => tree.unmount());
+});
+
+test('a new note carries the kind, prefilled from the project', async () => {
+  // It used to fall back to the meeting template whatever the project was, so
+  // a note made inside a class came out looking like a meeting note.
+  const onNewNote = jest.fn(async () => {});
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ParaFilesPanel
+        {...props}
+        folder="/A"
+        onNewNote={onNewNote}
+        defaultNoteKind="class"
+        onListEntries={async () => []}
+      />,
+    );
+  });
+
+  await act(async () => { press(tree, '+ New Note'); });
+  const input = tree.root.findAllByType(HandwritingTextInput)[0];
+  await act(async () => { input.props.onChangeText('Week 6'); });
+  await act(async () => { press(tree, 'Create'); });
+
+  expect(onNewNote).toHaveBeenCalledWith('Week 6', '/A', 'class');
+  act(() => tree.unmount());
+});
+
+test('the kind can be overridden for one note', async () => {
+  const onNewNote = jest.fn(async () => {});
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ParaFilesPanel
+        {...props}
+        folder="/A"
+        onNewNote={onNewNote}
+        defaultNoteKind="class"
+        onListEntries={async () => []}
+      />,
+    );
+  });
+
+  await act(async () => { press(tree, '+ New Note'); });
+  const input = tree.root.findAllByType(HandwritingTextInput)[0];
+  await act(async () => { input.props.onChangeText('Kickoff'); });
+  await act(async () => { press(tree, '🏢 Meeting'); });
+  await act(async () => { press(tree, 'Create'); });
+
+  expect(onNewNote).toHaveBeenCalledWith('Kickoff', '/A', 'meeting');
+  act(() => tree.unmount());
+});
+
+test('Delete asks before it deletes, and only then calls through', async () => {
+  const onDeleteFile = jest.fn(async () => {});
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ParaFilesPanel
+        {...props}
+        onDeleteFile={onDeleteFile}
+        onListEntries={async () => [entry('Plan.note')]}
+      />,
+    );
+  });
+
+  await act(async () => { press(tree, 'Delete…'); });
+  // The first press only opens the confirmation.
+  expect(onDeleteFile).not.toHaveBeenCalled();
+  expect(texts(tree).flat(Infinity).join(' ')).toContain('cannot be undone');
+
+  await act(async () => { press(tree, 'Cancel'); });
+  expect(onDeleteFile).not.toHaveBeenCalled();
+
+  await act(async () => { press(tree, 'Delete…'); });
+  await act(async () => { press(tree, 'Delete it'); });
+  expect(onDeleteFile).toHaveBeenCalledWith('/A/Plan.note');
+
+  act(() => tree.unmount());
+});
+
+test('Rename offers the current name without its extension', async () => {
+  const onRenameFile = jest.fn(async () => {});
+  let tree!: TestRenderer.ReactTestRenderer;
+  await act(async () => {
+    tree = TestRenderer.create(
+      <ParaFilesPanel
+        {...props}
+        onRenameFile={onRenameFile}
+        onListEntries={async () => [entry('Plan.note')]}
+      />,
+    );
+  });
+  await act(async () => { press(tree, 'Rename…'); });
+  const shown = texts(tree).flat(Infinity).join(' ');
+  expect(shown).toContain('Plan.note');
+  expect(shown).toContain('Its annotations follow it');
   act(() => tree.unmount());
 });
