@@ -1,19 +1,21 @@
 import {
+  activeProjects,
+  archivedProjects,
+  areaProjectCounts,
   countGrouped,
-  filterByArea,
   directTasksInArea,
+  filterByArea,
   filterByProject,
   filterByScope,
   groupTasks,
   groupingLabel,
-  activeProjects,
   moveActiveProject,
-  archivedProjects,
-  areaProjectCounts,
   projectOverdue,
   projectProgress,
   projectsInArea,
   scopeLabel,
+  sortDeliverables,
+  taskOverdue,
 } from './taskListView';
 import { withStatus } from './taskModel';
 import { Area, CalendarTask, Project } from './types';
@@ -459,5 +461,75 @@ describe('the PARA browser', () => {
 
   test('nothing finished means an empty archive', () => {
     expect(archivedProjects([project('p1', 'Live')])).toEqual([]);
+  });
+});
+
+describe('sortDeliverables', () => {
+  const task = (uid: string, over: Partial<CalendarTask> = {}): CalendarTask =>
+    ({ uid, title: uid, completed: false, createdAt: new Date('2026-01-01'), ...over } as CalendarTask);
+
+  test('actionable work sorts by due date, soonest first', () => {
+    const sorted = sortDeliverables([
+      task('late', { dueDate: new Date('2026-10-20') }),
+      task('soon', { dueDate: new Date('2026-10-09') }),
+      task('mid', { dueDate: new Date('2026-10-14') }),
+    ], false);
+    expect(sorted.map(t => t.uid)).toEqual(['soon', 'mid', 'late']);
+  });
+
+  test('undated work goes last rather than sorting as the epoch', () => {
+    const sorted = sortDeliverables([
+      task('none'),
+      task('dated', { dueDate: new Date('2026-10-20') }),
+    ], false);
+    expect(sorted.map(t => t.uid)).toEqual(['dated', 'none']);
+  });
+
+  test('completed work sorts by completion, most recent first', () => {
+    const sorted = sortDeliverables([
+      task('older', { completed: true, completedAt: new Date('2026-09-01') }),
+      task('newer', { completed: true, completedAt: new Date('2026-10-01') }),
+    ], true);
+    expect(sorted.map(t => t.uid)).toEqual(['newer', 'older']);
+  });
+
+  test('completed work with no completion time goes last', () => {
+    const sorted = sortDeliverables([
+      task('unknown', { completed: true }),
+      task('known', { completed: true, completedAt: new Date('2026-09-01') }),
+    ], true);
+    expect(sorted.map(t => t.uid)).toEqual(['known', 'unknown']);
+  });
+
+  test('does not mutate the list it was given', () => {
+    const input = [task('b', { dueDate: new Date('2026-10-20') }), task('a', { dueDate: new Date('2026-10-01') })];
+    sortDeliverables(input, false);
+    expect(input.map(t => t.uid)).toEqual(['b', 'a']);
+  });
+});
+
+describe('taskOverdue', () => {
+  const now = new Date('2026-10-08T12:00:00');
+
+  test('an all-day task is late only once its day is over', () => {
+    // Due today, not yet overdue at noon.
+    expect(taskOverdue({ uid: 'a', title: 'a', completed: false, createdAt: now,
+      dueDate: new Date('2026-10-08T00:00:00'), allDay: true } as CalendarTask, now)).toBe(false);
+    expect(taskOverdue({ uid: 'a', title: 'a', completed: false, createdAt: now,
+      dueDate: new Date('2026-10-07T00:00:00'), allDay: true } as CalendarTask, now)).toBe(true);
+  });
+
+  test('a timed task is late once its time has passed', () => {
+    expect(taskOverdue({ uid: 'a', title: 'a', completed: false, createdAt: now,
+      dueDate: new Date('2026-10-08T09:00:00'), allDay: false } as CalendarTask, now)).toBe(true);
+  });
+
+  test('finished work is never overdue', () => {
+    expect(taskOverdue({ uid: 'a', title: 'a', completed: true, createdAt: now,
+      dueDate: new Date('2026-01-01'), allDay: true } as CalendarTask, now)).toBe(false);
+  });
+
+  test('undated work is never overdue', () => {
+    expect(taskOverdue({ uid: 'a', title: 'a', completed: false, createdAt: now } as CalendarTask, now)).toBe(false);
   });
 });

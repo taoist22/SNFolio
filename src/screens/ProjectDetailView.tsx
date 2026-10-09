@@ -8,7 +8,13 @@ import React from 'react';
 import { Dimensions, LayoutChangeEvent, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Area, CalendarEvent, CalendarTask, Project } from '../domain/types';
 import { isDone, statusGlyph, taskStatus } from '../domain/taskModel';
-import { projectOverdue, projectProgress, ProjectLookup } from '../domain/taskListView';
+import {
+  ProjectLookup,
+  projectOverdue,
+  projectProgress,
+  sortDeliverables,
+  taskOverdue,
+} from '../domain/taskListView';
 import { ParaFilesPanel } from './ParaFilesPanel';
 import { ParaFolderEntry } from '../supernote/exportService';
 import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingTextInput';
@@ -60,8 +66,28 @@ function DeliverableTaskRow({
           <LinkedFileMarker item={task} />{task.title}
         </Text>
       </TouchableOpacity>
+      {/* Due for work ahead, completed for work behind: what you still owe
+          versus what you finished and when. */}
+      {Boolean(deliverableDate(task)) && (
+        <Text
+          allowFontScaling={false}
+          style={[styles.taskDate, taskOverdue(task, new Date()) && styles.taskDateLate]}
+        >
+          {taskOverdue(task, new Date()) ? `⚠ ${deliverableDate(task)}` : deliverableDate(task)}
+        </Text>
+      )}
     </View>
   );
+}
+
+/** Short date for a deliverable row — completion if finished, else due. */
+function deliverableDate(task: CalendarTask): string {
+  const value = isDone(task) ? task.completedAt : task.dueDate;
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : '';
 }
 
 interface ProjectDetailViewProps {
@@ -170,10 +196,8 @@ export function ProjectDetailView({
   const lookup: ProjectLookup = { projectOf, nameOf: () => project.name };
   const progress = projectProgress(tasks, project.id, lookup);
   const mine = tasks.filter(t => projectOf(t.uid) === project.id);
-  const actionableDeliverables = mine.filter(task => !isDone(task));
-  const completedDeliverables = mine
-    .filter(isDone)
-    .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0));
+  const actionableDeliverables = sortDeliverables(mine.filter(task => !isDone(task)), false);
+  const completedDeliverables = sortDeliverables(mine.filter(isDone), true);
   const overdue = projectOverdue(project);
 
   const [classificationOpen, setClassificationOpen] = React.useState(false);
@@ -1086,6 +1110,8 @@ const styles = StyleSheet.create({
   glyph: { fontSize: 17, color: '#000000', marginRight: 6 },
   taskBody: { flex: 1 },
   taskText: { fontSize: 15, color: '#000000' },
+  taskDate: { fontSize: 12, color: '#505050', marginLeft: 8 },
+  taskDateLate: { color: '#000000', fontWeight: 'bold' },
   taskDone: { textDecorationLine: 'line-through', color: '#606060' },
   focusedHeader: {
     minHeight: 54,

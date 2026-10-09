@@ -346,3 +346,42 @@ export function areaProjectCounts(
 export function archivedProjects(projects: Project[]): Project[] {
   return projects.filter(p => p.status !== 'active');
 }
+
+/**
+ * Deliverables in the order a project needs them.
+ *
+ * Actionable work sorts by when it is due, soonest first, with undated tasks
+ * last — they are the ones with no claim on a particular day. Completed work
+ * sorts by when it was finished, most recent first, because the useful question
+ * about finished work is what you did lately.
+ *
+ * The order matters more than it looks: the project card shows only the first
+ * few, so an arbitrary order means the card can show something due next month
+ * while hiding the one due tomorrow.
+ */
+export function sortDeliverables(tasks: CalendarTask[], done: boolean): CalendarTask[] {
+  const at = (task: CalendarTask): number | undefined => {
+    const value = done ? task.completedAt : task.dueDate;
+    const time = value ? new Date(value).getTime() : NaN;
+    return Number.isFinite(time) ? time : undefined;
+  };
+
+  return [...tasks].sort((left, right) => {
+    const a = at(left);
+    const b = at(right);
+    if (a === undefined && b === undefined) return 0;
+    // Undated last either way, rather than sorting as the epoch.
+    if (a === undefined) return 1;
+    if (b === undefined) return -1;
+    return done ? b - a : a - b;
+  });
+}
+
+/** True when an incomplete task's due date has passed. */
+export function taskOverdue(task: CalendarTask, now: Date): boolean {
+  if (!task.dueDate || isDone(task)) return false;
+  const due = new Date(task.dueDate);
+  // An all-day task is late once its day is over, not at midnight that morning.
+  if (task.allDay !== false) due.setHours(23, 59, 59, 999);
+  return due.getTime() < now.getTime();
+}
