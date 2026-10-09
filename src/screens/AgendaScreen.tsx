@@ -4028,11 +4028,14 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
    */
   const handleConvertEventToTask = trackWorkspaceOperation(async (
     event: CalendarEvent,
-    { attachOnly = false }: { attachOnly?: boolean } = {}
+    { attachOnly = false, title }: { attachOnly?: boolean; title?: string } = {}
   ) => {
     const identity = noteIdentity(event);
     const uid = `task-${Date.now()}`;
-    const task = taskFromEvent(event, uid, new Date());
+    // A step hung off an item is named by the user; a converted deadline keeps
+    // the item's own title, which is what it is called everywhere else.
+    const base = taskFromEvent(event, uid, new Date());
+    const task = title?.trim() ? { ...base, title: title.trim() } : base;
     calendarStorage.upsertTask(task);
 
     // The event's own filing carries over, so a converted deadline stays in the
@@ -6409,8 +6412,8 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               void handleConvertEventToTask(event);
               setDetailEvent(null);
             }}
-            onAddTask={event => {
-              void handleConvertEventToTask(event, { attachOnly: true });
+            onAddTask={(event, title) => {
+              void handleConvertEventToTask(event, { attachOnly: true, title });
               setDetailEvent(null);
             }}
             onLinkNote={event => { void linkExistingNote(eventNoteKey(event, perSessionNotes(event)), event); }}

@@ -5,6 +5,7 @@ import React from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CalendarEvent, CalendarTask } from '../domain/types';
 import { isDone, statusGlyph, taskRowLabel, taskStatus } from '../domain/taskModel';
+import { HandwritingTextInput, HandwritingTextInputHandle } from './HandwritingTextInput';
 
 interface EventDetailsModalProps {
   event: CalendarEvent | null;
@@ -17,7 +18,7 @@ interface EventDetailsModalProps {
   /** Makes a task that stands in for this item; the item itself is untouched. */
   onMakeTask?: (event: CalendarEvent) => void;
   /** Adds a task alongside it, leaving it on the calendar. */
-  onAddTask?: (event: CalendarEvent) => void;
+  onAddTask?: (event: CalendarEvent, title: string) => void;
   /** Tasks attached to this item, so what you owe is visible from the item. */
   linkedTasks?: CalendarTask[];
   /** Tasks that could be attached — everything not already on this item. */
@@ -53,7 +54,16 @@ export function EventDetailsModal({
   // Picking an existing task takes over the body rather than opening a second
   // sheet: two stacked modals are unreliable here.
   const [picking, setPicking] = React.useState(false);
-  React.useEffect(() => { setPicking(false); }, [event?.uid]);
+  const [naming, setNaming] = React.useState(false);
+  const [draftTitle, setDraftTitle] = React.useState('');
+  // Read at press time: HandwritingTextInput commits onChangeText on blur, so
+  // a name typed and confirmed without leaving the field never reaches state.
+  const titleInputRef = React.useRef<HandwritingTextInputHandle>(null);
+  React.useEffect(() => {
+    setPicking(false);
+    setNaming(false);
+    setDraftTitle('');
+  }, [event?.uid]);
   if (!event) return <></>;
   const recurrenceWarning = event.recurrenceError && event.recurrenceError.length > 240
     ? `${event.recurrenceError.slice(0, 237)}...`
@@ -70,7 +80,46 @@ export function EventDetailsModal({
             <Text allowFontScaling={false} style={styles.title} numberOfLines={2}>{event.summary}</Text>
             <TouchableOpacity onPress={onClose}><Text allowFontScaling={false} style={styles.close}>✕</Text></TouchableOpacity>
           </View>
-          {picking ? (
+          {naming ? (
+            <View style={styles.details}>
+              <Text allowFontScaling={false} style={styles.taskHeading}>
+                What needs doing?
+              </Text>
+              <HandwritingTextInput
+                ref={titleInputRef}
+                style={styles.nameInput}
+                value={draftTitle}
+                onChangeText={setDraftTitle}
+                // The item's own title, offered rather than imposed: a step
+                // hung off a meeting rarely shares its name.
+                placeholder={event.summary}
+                placeholderTextColor="#707070"
+                autoCorrect={false}
+              />
+              <View style={styles.nameRow}>
+                <TouchableOpacity
+                  style={styles.secondary}
+                  onPress={() => {
+                    const typed = (titleInputRef.current?.getValue() ?? draftTitle).trim();
+                    onAddTask?.(event, typed || event.summary);
+                    setDraftTitle('');
+                    setNaming(false);
+                  }}
+                >
+                  <Text allowFontScaling={false} style={styles.secondaryText}>Add task</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondary}
+                  onPress={() => {
+                    setDraftTitle('');
+                    setNaming(false);
+                  }}
+                >
+                  <Text allowFontScaling={false} style={styles.secondaryText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : picking ? (
             <ScrollView style={styles.details}>
               <Text allowFontScaling={false} style={styles.taskHeading}>
                 Attach an existing task
@@ -185,8 +234,13 @@ export function EventDetailsModal({
                   </TouchableOpacity>
                 )}
                 {onAddTask && (
-                  <TouchableOpacity style={styles.secondary} onPress={() => onAddTask(event)}>
-                    <Text allowFontScaling={false} style={styles.secondaryText}>+ New task for it</Text>
+                  <TouchableOpacity style={styles.secondary} onPress={() => {
+                    setPicking(false);
+                    setNaming(value => !value);
+                  }}>
+                    <Text allowFontScaling={false} style={styles.secondaryText}>
+                      {naming ? '← Back to details' : '+ New task for it'}
+                    </Text>
                   </TouchableOpacity>
                 )}
                 {onLinkTask && (
@@ -219,6 +273,17 @@ const styles = StyleSheet.create({
   content: { width: '68%', maxWidth: 720, maxHeight: '86%', backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', borderRadius: 8, padding: 14 },
   header: { flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#000', paddingBottom: 8 },
   title: { flex: 1, fontSize: 19, fontWeight: 'bold', color: '#000' },
+  nameInput: {
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    fontSize: 15,
+    color: '#000000',
+    marginBottom: 8,
+  },
+  nameRow: { flexDirection: 'row', alignItems: 'center' },
   taskHeading: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginTop: 10, marginBottom: 4 },
   taskRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
   taskGlyph: { fontSize: 16, color: '#000000', marginRight: 8 },
