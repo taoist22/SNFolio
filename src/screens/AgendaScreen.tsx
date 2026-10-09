@@ -63,7 +63,7 @@ import {
   templateSettingKey,
 } from '../domain/noteTemplates';
 import { expandEventsByDay, expandEventsForDate, parseIcsContentStrict } from '../domain/icsParser';
-import { eventMatchesTaskRule, taskFromEvent, taskifiedEventIdentities } from '../domain/eventTasks';
+import { eventMatchesTaskRule, taskFromEvent, taskifiedEventIdentities, tasksForEvent } from '../domain/eventTasks';
 import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
 import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
@@ -6375,6 +6375,14 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             }}
             onCopy={event => void handleCopyFeedEvent(event)}
             onHide={handleHideFeedEvent}
+            linkedTasks={detailEvent
+              ? tasksForEvent(noteIdentity(detailEvent), tasks, calendarStorage.getAllMemberships())
+              : []}
+            onToggleTask={handleToggleTask}
+            onEditTask={task => {
+              setDetailEvent(null);
+              handleEditTask(task);
+            }}
             onMakeTask={event => {
               void handleConvertEventToTask(event);
               setDetailEvent(null);

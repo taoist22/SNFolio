@@ -3,7 +3,8 @@ import { formatDateTime } from '../domain/timeOfDay';
 import { useTimeFormat } from './TimeFormatContext';
 import React from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { CalendarEvent } from '../domain/types';
+import { CalendarEvent, CalendarTask } from '../domain/types';
+import { isDone, statusGlyph, taskRowLabel, taskStatus } from '../domain/taskModel';
 
 interface EventDetailsModalProps {
   event: CalendarEvent | null;
@@ -17,6 +18,10 @@ interface EventDetailsModalProps {
   onMakeTask?: (event: CalendarEvent) => void;
   /** Adds a task alongside it, leaving it on the calendar. */
   onAddTask?: (event: CalendarEvent) => void;
+  /** Tasks attached to this item, so what you owe is visible from the item. */
+  linkedTasks?: CalendarTask[];
+  onToggleTask?: (task: CalendarTask) => void;
+  onEditTask?: (task: CalendarTask) => void;
   notePath?: string;
   onLinkNote?: (event: CalendarEvent) => void;
   onUnlinkNote?: (event: CalendarEvent) => void;
@@ -33,6 +38,9 @@ export function EventDetailsModal({
   onHide,
   onMakeTask,
   onAddTask,
+  linkedTasks = [],
+  onToggleTask,
+  onEditTask,
   notePath, onLinkNote, onUnlinkNote,
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
@@ -65,6 +73,41 @@ export function EventDetailsModal({
             ) : null}
             {event.location ? <Text allowFontScaling={false} style={styles.body}>📍 {event.location}</Text> : null}
             {event.description ? <Text allowFontScaling={false} style={styles.body}>{event.description}</Text> : null}
+
+            {/* A task made from this item, or hung off it. Shown here because
+                the item is where you look to find out what it involves. */}
+            {linkedTasks.length > 0 && (
+              <>
+                <Text allowFontScaling={false} style={styles.taskHeading}>
+                  ☑ Tasks ({linkedTasks.filter(task => !isDone(task)).length} open)
+                </Text>
+                {linkedTasks.map(task => (
+                  <View key={task.uid} style={styles.taskRow}>
+                    <TouchableOpacity
+                      disabled={!onToggleTask}
+                      onPress={() => onToggleTask?.(task)}
+                    >
+                      <Text allowFontScaling={false} style={styles.taskGlyph}>
+                        {statusGlyph(taskStatus(task))}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.taskBody}
+                      disabled={!onEditTask}
+                      onPress={() => onEditTask?.(task)}
+                    >
+                      <Text
+                        allowFontScaling={false}
+                        numberOfLines={1}
+                        style={[styles.taskTitle, isDone(task) && styles.taskDone]}
+                      >
+                        {taskRowLabel(task, true)}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            )}
           </ScrollView>
 
           {/* Short timed blocks and all-day rows cannot safely fit inline
@@ -130,6 +173,12 @@ const styles = StyleSheet.create({
   content: { width: '68%', maxWidth: 720, maxHeight: '76%', backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', borderRadius: 8, padding: 14 },
   header: { flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#000', paddingBottom: 8 },
   title: { flex: 1, fontSize: 19, fontWeight: 'bold', color: '#000' },
+  taskHeading: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginTop: 10, marginBottom: 4 },
+  taskRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+  taskGlyph: { fontSize: 16, color: '#000000', marginRight: 8 },
+  taskBody: { flex: 1 },
+  taskTitle: { fontSize: 13, color: '#000000' },
+  taskDone: { textDecorationLine: 'line-through', color: '#606060' },
   close: { fontSize: 20, fontWeight: 'bold', color: '#000', paddingLeft: 12 },
   details: { maxHeight: 260 },
   when: { fontSize: 16, fontWeight: 'bold', color: '#000', marginTop: 12 },
