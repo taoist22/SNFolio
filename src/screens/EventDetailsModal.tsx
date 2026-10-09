@@ -13,6 +13,10 @@ interface EventDetailsModalProps {
   onDelete: (event: CalendarEvent) => void;
   onCopy: (event: CalendarEvent) => void;
   onHide: (event: CalendarEvent) => void;
+  /** Makes a task that stands in for this item; the item itself is untouched. */
+  onMakeTask?: (event: CalendarEvent) => void;
+  /** Adds a task alongside it, leaving it on the calendar. */
+  onAddTask?: (event: CalendarEvent) => void;
   notePath?: string;
   onLinkNote?: (event: CalendarEvent) => void;
   onUnlinkNote?: (event: CalendarEvent) => void;
@@ -27,6 +31,8 @@ export function EventDetailsModal({
   onDelete,
   onCopy,
   onHide,
+  onMakeTask,
+  onAddTask,
   notePath, onLinkNote, onUnlinkNote,
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
@@ -88,6 +94,19 @@ export function EventDetailsModal({
                 <TouchableOpacity style={styles.secondary} onPress={() => onHide(event)}>
                   <Text allowFontScaling={false} style={styles.secondaryText}>Hide on Supernote</Text>
                 </TouchableOpacity>
+                {/* Neither of these writes to the calendar: a subscribed feed
+                    cannot be written to, and a CalDAV item belongs to that
+                    account. A task is made to stand in, or to sit beside. */}
+                {onMakeTask && (
+                  <TouchableOpacity style={styles.secondary} onPress={() => onMakeTask(event)}>
+                    <Text allowFontScaling={false} style={styles.secondaryText}>☑ Make it a task</Text>
+                  </TouchableOpacity>
+                )}
+                {onAddTask && (
+                  <TouchableOpacity style={styles.secondary} onPress={() => onAddTask(event)}>
+                    <Text allowFontScaling={false} style={styles.secondaryText}>+ Add a task to it</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </>
           ) : (

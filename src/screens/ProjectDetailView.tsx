@@ -83,6 +83,7 @@ interface ProjectDetailViewProps {
   onSetRecurringNotes: (mode: 'series' | 'session') => void;
   /** Saves the comma-separated words that file calendar items under this project; blank turns it off. */
   onSetAutoFileMatch: (words: string) => void;
+  onSetTaskifyMatch: (words: string) => void;
   /** This project's upcoming events, soonest first. */
   upcomingEvents: CalendarEvent[];
   onOpenEvent: (event: CalendarEvent) => void;
@@ -139,6 +140,7 @@ export function ProjectDetailView({
   onMoveFile,
   onSetRecurringNotes,
   onSetAutoFileMatch,
+  onSetTaskifyMatch,
   upcomingEvents,
   onOpenEvent,
   filesRevision = 0,
@@ -185,8 +187,11 @@ export function ProjectDetailView({
   const [confirmingComplete, setConfirmingComplete] = React.useState<boolean>(false);
   const [actionsOpen, setActionsOpen] = React.useState<boolean>(false);
   const [autoFileDraft, setAutoFileDraft] = React.useState(project.autoFileMatch || '');
+  const taskifyInputRef = React.useRef<HandwritingTextInputHandle>(null);
+  const [taskifyDraft, setTaskifyDraft] = React.useState(project.taskifyMatch || '');
   const autoFileInputRef = React.useRef<HandwritingTextInputHandle>(null);
   React.useEffect(() => { setAutoFileDraft(project.autoFileMatch || ''); }, [project.id, project.autoFileMatch]);
+  React.useEffect(() => { setTaskifyDraft(project.taskifyMatch || ''); }, [project.id, project.taskifyMatch]);
   // Start from the window width so the layout does not switch (and re-read the folder) on first layout.
   const [width, setWidth] = React.useState(() => Dimensions.get('window').width);
   const wide = width >= TWO_COLUMN_WIDTH;
@@ -824,6 +829,31 @@ export function ProjectDetailView({
         </View>
         {Boolean(project.autoFileMatch) && (
           <Text allowFontScaling={false} style={styles.hint}>{`Filing items containing: ${project.autoFileMatch}`}</Text>
+        )}
+
+        <Text allowFontScaling={false} style={styles.panelHeading}>Treat as deadlines</Text>
+        <Text allowFontScaling={false} style={styles.dueText}>
+          Items filed here whose title contains any of these words become tasks you can tick off, and stop
+          drawing on the calendar. The calendar item itself is never changed — a subscribed feed cannot be
+          written to, and a CalDAV item belongs to that account. Put one back any time and it stays back.
+        </Text>
+        <View style={styles.addAreaRow}>
+          <HandwritingTextInput
+            ref={taskifyInputRef}
+            style={styles.addAreaInput}
+            value={taskifyDraft}
+            onChangeText={setTaskifyDraft}
+            placeholder="e.g. Due, Assignment"
+            placeholderTextColor="#707070"
+            autoCorrect={false}
+          />
+          <TouchableOpacity style={styles.addAreaButton}
+            onPress={() => onSetTaskifyMatch((taskifyInputRef.current?.getValue() ?? taskifyDraft).trim())}>
+            <Text allowFontScaling={false} style={styles.areaOptionText}>Save</Text>
+          </TouchableOpacity>
+        </View>
+        {Boolean(project.taskifyMatch) && (
+          <Text allowFontScaling={false} style={styles.hint}>{`Treating as deadlines: ${project.taskifyMatch}`}</Text>
         )}
         <View style={styles.classificationRow}>
           <Text allowFontScaling={false} style={styles.hint}>Choices are saved as you tap them.</Text>

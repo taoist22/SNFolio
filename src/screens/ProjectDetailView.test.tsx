@@ -16,7 +16,7 @@ const press = (tree: TestRenderer.ReactTestRenderer, label: string) => {
 function render(project: Project, overrides: Partial<React.ComponentProps<typeof ProjectDetailView>> = {}) {
   const props: React.ComponentProps<typeof ProjectDetailView> = {
     project, areas: [], tasks: [], projectOf: () => undefined, linkedNotes: [], weekStartsOn: 0,
-    onSetClassStart: jest.fn(), onCreateWeekFolders: jest.fn(), onSetRecurringNotes: jest.fn(), onSetAutoFileMatch: jest.fn(), upcomingEvents: [], onOpenEvent: jest.fn(), onSetClassWeekStart: jest.fn(), onMoveFile: jest.fn(async () => {}),
+    onSetClassStart: jest.fn(), onCreateWeekFolders: jest.fn(), onSetRecurringNotes: jest.fn(), onSetAutoFileMatch: jest.fn(), onSetTaskifyMatch: jest.fn(), upcomingEvents: [], onOpenEvent: jest.fn(), onSetClassWeekStart: jest.fn(), onMoveFile: jest.fn(async () => {}),
     onBack: jest.fn(), onSetDue: jest.fn(), onAssignArea: jest.fn(), onCreateArea: jest.fn(),
     onUpdateClassification: jest.fn(), onRename: jest.fn(), onToggleStatus: jest.fn(), onArchive: jest.fn(),
     onConvertToArea: jest.fn(), onDelete: jest.fn(), folder: '/Note/SNFolio/Projects/IDS105',

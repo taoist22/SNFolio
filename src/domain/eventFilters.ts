@@ -1,3 +1,4 @@
+import { noteIdentity } from './meetingSnapshot';
 import { CalendarEvent, CalendarSettings } from './types';
 
 function feedFingerprint(event: CalendarEvent): string {
@@ -73,10 +74,24 @@ export function dedupeEvents(events: CalendarEvent[]): CalendarEvent[] {
 /**
  * Filters calendar events based on user preferences (all-day events, solo events)
  */
-export function filterEvents(events: CalendarEvent[], settings: CalendarSettings): CalendarEvent[] {
+export function filterEvents(
+  events: CalendarEvent[],
+  settings: CalendarSettings,
+  /**
+   * Identities of events a task now stands in for. Passed in rather than read
+   * here: it comes from membership, which this pure filter has no business
+   * reaching into.
+   */
+  taskified: Set<string> = new Set()
+): CalendarEvent[] {
   const hidden = new Set(settings.hiddenFeedEventIds || []);
   return dedupeEvents(events).filter(event => {
     if (event.isTaskMirror) {
+      return false;
+    }
+    // Converted to a task. The event is untouched upstream and comes back the
+    // moment the link is cleared.
+    if (taskified.has(noteIdentity(event))) {
       return false;
     }
     if (event.sourceKind === 'feed' && hidden.has(feedEventHideIdentity(event))) {

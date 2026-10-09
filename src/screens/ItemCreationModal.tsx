@@ -119,6 +119,11 @@ interface ItemCreationModalProps {
   onTaskNoteAction?: (task: CalendarTask, existingPath?: string) => void;
   /** Only offered while editing an existing item, never while creating one. */
   onDeleteTask?: (uid: string) => void;
+  /**
+   * Offered when this task stands in for a calendar item: puts that item back
+   * on the calendar. Absent when the task was not made from one.
+   */
+  onRestoreEvent?: () => void;
   /** PARA areas to choose from, and the one this task is filed under. */
   areas?: Area[];
   taskAreaId?: string;
@@ -149,6 +154,7 @@ export function ItemCreationModal({
   onCreateEvent,
   onCreateTask,
   onDeleteTask,
+  onRestoreEvent,
   editingTask,
   taskNotePath, eventNotePath, onEventNoteAction, onLinkEventNote, onUnlinkNote,
   onTaskNoteAction,
@@ -1172,6 +1178,20 @@ export function ItemCreationModal({
                 💾 Save {itemKind === 'event' ? 'Event' : 'Task'}
               </Text>
             </TouchableOpacity>
+
+            {/* This task is standing in for a calendar item. Putting the item
+                back is the only way to undo that, so it belongs on the task. */}
+            {editingTask && onRestoreEvent && (
+              <TouchableOpacity
+                style={styles.deleteTaskBtn}
+                onPress={() => {
+                  onRestoreEvent();
+                  onClose();
+                }}
+              >
+                <Text allowFontScaling={false} style={styles.deleteTaskBtnText}>📅 Put the event back</Text>
+              </TouchableOpacity>
+            )}
 
             {/* Editing only: there is nothing to delete from a create form. */}
             {editingTask && onDeleteTask && (

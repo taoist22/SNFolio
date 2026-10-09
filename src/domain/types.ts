@@ -79,6 +79,14 @@ export interface Project {
    * comma-separated words are filed under this project, unless already filed.
    */
   autoFileMatch?: string;
+  /**
+   * Words that mark an event in this project as really a deadline. Matched the
+   * same way as autoFileMatch, against the title only. A matching event is
+   * represented by a task and hidden from the calendar; the event itself is
+   * never altered, because a feed is read-only and a CalDAV event belongs to
+   * the account rather than to SNFolio.
+   */
+  taskifyMatch?: string;
   status: ProjectStatus;
   /**
    * Where this project's notes are filed, overriding the per-kind folder, and
@@ -122,6 +130,22 @@ export interface Resource {
  * alike rather than each carrying its own fields.
  */
 export interface ItemMembership {
+  /**
+   * On a TASK: the event it was made from or attached to.
+   * On an EVENT: the uid of the task standing in for it, which also hides it
+   * from the calendar.
+   *
+   * Both live here rather than on the objects because an event is rebuilt from
+   * ICS on every sync, so anything stored on it is lost.
+   */
+  forEventIdentity?: string;
+  taskifiedAs?: string;
+  /**
+   * Set when the user puts a converted event back on the calendar. The rule
+   * does not convert it again — the same restraint autoFiledProjectId gives
+   * auto-filing, so undoing a rule's decision sticks.
+   */
+  taskifyDeclined?: boolean;
   /**
    * Set when a project's auto-file words filed this item. If the item is later
    * unfiled by hand it stays unfiled: the rule does not file it again.

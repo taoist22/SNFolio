@@ -63,6 +63,7 @@ import {
   templateSettingKey,
 } from '../domain/noteTemplates';
 import { expandEventsByDay, expandEventsForDate, parseIcsContentStrict } from '../domain/icsParser';
+import { eventMatchesTaskRule, taskFromEvent, taskifiedEventIdentities } from '../domain/eventTasks';
 import { feedEventHideIdentity, filterEvents } from '../domain/eventFilters';
 import { belongsToSeries, findStoredSeries } from '../domain/eventSeries';
 import { meetingNoteService } from '../supernote/meetingNoteService';
@@ -633,16 +634,25 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
   const visibleEvents = useMemo(() => {
     // Hiding a feed item changes the settings, not the events.
     void refreshState;
+    // Converting one changes membership, which is not reactive either.
+    void membershipRevision;
     return timePerf(
       'filter events',
-      () => filterEvents(allParsedEvents, {
-        ...calendarStorage.getSettings(),
-        hideAllDayEvents: hideAllDay,
-        hideSoloEvents: hideSolo,
-      }),
+      () => filterEvents(
+        allParsedEvents,
+        {
+          ...calendarStorage.getSettings(),
+          hideAllDayEvents: hideAllDay,
+          hideSoloEvents: hideSolo,
+        },
+        taskifiedEventIdentities(
+          calendarStorage.getAllMemberships(),
+          new Set(calendarStorage.getTasks().map(task => task.uid))
+        )
+      ),
       () => `${allParsedEvents.length} events`,
     );
-  }, [allParsedEvents, hideAllDay, hideSolo, refreshState]);
+  }, [allParsedEvents, hideAllDay, hideSolo, refreshState, membershipRevision]);
 
   useEffect(() => {
     const todays = timePerf('day build', () => expandEventsForDate(visibleEvents, selectedDate), () => `${visibleEvents.length} in window`);
@@ -883,7 +893,30 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
       calendarStorage.setMembership(identity, { projectId: project.id, autoFiledProjectId: project.id });
       filed++;
     }
-    if (filed) setMembershipRevision(value => value + 1);
+
+    // A second pass, over every filed event rather than only the ones just
+    // filed: a rule added today should convert the deadlines already sitting in
+    // the project, not just the ones that arrive next.
+    let converted = 0;
+    const liveTasks = new Set(calendarStorage.getTasks().map(task => task.uid));
+    for (const event of events) {
+      if (event.isTask || event.isTaskMirror) continue;
+      if (event.sourceKind !== 'feed' && event.sourceKind !== 'caldav') continue;
+      const identity = noteIdentity(event);
+      const membership = calendarStorage.getMembership(identity);
+      // Already standing in, or deliberately restored by hand — either way the
+      // rule does not get to decide again. Same restraint as autoFiledProjectId.
+      if (membership.taskifiedAs && liveTasks.has(membership.taskifiedAs)) continue;
+      if (membership.taskifyDeclined) continue;
+      const owning = membership.projectId
+        ? allProjects.find(candidate => candidate.id === membership.projectId)
+        : undefined;
+      if (!eventMatchesTaskRule(event, owning)) continue;
+      void handleConvertEventToTask(event);
+      converted++;
+    }
+
+    if (filed || converted) setMembershipRevision(value => value + 1);
     return filed;
   };
 
@@ -3981,6 +4014,62 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
     setStatusMsg(result.message);
   };
 
+  /**
+   * Makes a task that stands in for an event.
+   *
+   * Nothing is written back: a feed has no write endpoint, and a CalDAV event
+   * belongs to the account rather than to SNFolio, so converting one must not
+   * remove something the user's other devices can see. The event is hidden
+   * locally and comes back the moment the link is cleared.
+   */
+  const handleConvertEventToTask = trackWorkspaceOperation(async (
+    event: CalendarEvent,
+    { attachOnly = false }: { attachOnly?: boolean } = {}
+  ) => {
+    const identity = noteIdentity(event);
+    const uid = `task-${Date.now()}`;
+    const task = taskFromEvent(event, uid, new Date());
+    calendarStorage.upsertTask(task);
+
+    // The event's own filing carries over, so a converted deadline stays in the
+    // project it belonged to.
+    const eventMembership = calendarStorage.getMembership(identity);
+    calendarStorage.setMembership(uid, {
+      forEventIdentity: identity,
+      areaId: eventMembership.areaId,
+      projectId: eventMembership.projectId,
+    });
+    if (!attachOnly) calendarStorage.setMembership(identity, { taskifiedAs: uid });
+
+    setTasks([...calendarStorage.getTasks()]);
+    setMembershipRevision(value => value + 1);
+    void calendarStorage.flush();
+    setStatusMsg(attachOnly
+      ? `Added a task to "${event.summary}".`
+      : `"${event.summary}" is now a task.`);
+    return task;
+  });
+
+  /** Puts a converted event back on the calendar, leaving the task alone. */
+  const handleRestoreEvent = trackWorkspaceOperation(async (eventIdentity: string) => {
+    calendarStorage.setMembership(eventIdentity, { taskifiedAs: undefined, taskifyDeclined: true });
+    setMembershipRevision(value => value + 1);
+    void calendarStorage.flush();
+    setStatusMsg('The event is back on the calendar.');
+  });
+
+  /** The words that mark an item in this project as a deadline. */
+  const handleSetTaskifyMatch = (projectId: string, words: string) => {
+    const stored = calendarStorage.getProjects().find(candidate => candidate.id === projectId);
+    if (!stored) return;
+    calendarStorage.upsertProject({ ...stored, taskifyMatch: words || undefined });
+    setProjects([...calendarStorage.getProjects()]);
+    setOpenProject(current => (current && current.id === projectId
+      ? { ...current, taskifyMatch: words || undefined }
+      : current));
+    setStatusMsg(words ? `Treating items containing "${words}" as deadlines.` : 'Deadline words cleared.');
+  };
+
   const handleMoveParaFile = async (path: string, destinationFolder: string): Promise<void> => {
     const name = path.split('/').pop() || path;
     try {
@@ -6286,6 +6375,14 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             }}
             onCopy={event => void handleCopyFeedEvent(event)}
             onHide={handleHideFeedEvent}
+            onMakeTask={event => {
+              void handleConvertEventToTask(event);
+              setDetailEvent(null);
+            }}
+            onAddTask={event => {
+              void handleConvertEventToTask(event, { attachOnly: true });
+              setDetailEvent(null);
+            }}
             onLinkNote={event => { void linkExistingNote(eventNoteKey(event, perSessionNotes(event)), event); }}
             onUnlinkNote={event => unlinkExistingNote(eventNoteKey(event, perSessionNotes(event)))}
             notePath={detailEvent ? eventNotePaths[detailEvent.uid] : undefined}
@@ -6361,6 +6458,14 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
               editingTask ? projectOfTask(editingTask.uid) : pendingProjectId
             }
             onCreateProject={handleCreateProject}
+            onRestoreEvent={(() => {
+              if (!editingTask) return undefined;
+              const identity = calendarStorage.getMembership(editingTask.uid).forEventIdentity;
+              if (!identity) return undefined;
+              // Only when it is actually hiding something.
+              if (calendarStorage.getMembership(identity).taskifiedAs !== editingTask.uid) return undefined;
+              return () => { void handleRestoreEvent(identity); };
+            })()}
             onDeleteTask={uid => {
               const task = calendarStorage.getTasks().find(t => t.uid === uid);
               if (task) requestDeleteTask(task);
@@ -6482,6 +6587,7 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
                 syncOpenProject(stored.id);
               }}
               onSetAutoFileMatch={words => handleSetAutoFileMatch(openProject.id, words)}
+              onSetTaskifyMatch={words => handleSetTaskifyMatch(openProject.id, words)}
               upcomingEvents={paraUpcomingEvents.filter(event =>
                 calendarStorage.getMembership(noteIdentity(event)).projectId === openProject.id)}
               onOpenEvent={handleOpenEventDetails}
