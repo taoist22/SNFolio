@@ -20,6 +20,9 @@ interface EventDetailsModalProps {
   onAddTask?: (event: CalendarEvent) => void;
   /** Tasks attached to this item, so what you owe is visible from the item. */
   linkedTasks?: CalendarTask[];
+  /** Tasks that could be attached — everything not already on this item. */
+  linkableTasks?: CalendarTask[];
+  onLinkTask?: (task: CalendarTask) => void;
   onToggleTask?: (task: CalendarTask) => void;
   onEditTask?: (task: CalendarTask) => void;
   notePath?: string;
@@ -39,12 +42,18 @@ export function EventDetailsModal({
   onMakeTask,
   onAddTask,
   linkedTasks = [],
+  linkableTasks = [],
+  onLinkTask,
   onToggleTask,
   onEditTask,
   notePath, onLinkNote, onUnlinkNote,
   onNoteAction,
 }: EventDetailsModalProps): React.JSX.Element {
   const timeFormat = useTimeFormat();
+  // Picking an existing task takes over the body rather than opening a second
+  // sheet: two stacked modals are unreliable here.
+  const [picking, setPicking] = React.useState(false);
+  React.useEffect(() => { setPicking(false); }, [event?.uid]);
   if (!event) return <></>;
   const recurrenceWarning = event.recurrenceError && event.recurrenceError.length > 240
     ? `${event.recurrenceError.slice(0, 237)}...`
@@ -61,6 +70,35 @@ export function EventDetailsModal({
             <Text allowFontScaling={false} style={styles.title} numberOfLines={2}>{event.summary}</Text>
             <TouchableOpacity onPress={onClose}><Text allowFontScaling={false} style={styles.close}>✕</Text></TouchableOpacity>
           </View>
+          {picking ? (
+            <ScrollView style={styles.details}>
+              <Text allowFontScaling={false} style={styles.taskHeading}>
+                Attach an existing task
+              </Text>
+              {linkableTasks.length === 0 && (
+                <Text allowFontScaling={false} style={styles.body}>
+                  Every task is either already on this item or finished.
+                </Text>
+              )}
+              {linkableTasks.map(task => (
+                <TouchableOpacity
+                  key={task.uid}
+                  style={styles.taskRow}
+                  onPress={() => {
+                    onLinkTask?.(task);
+                    setPicking(false);
+                  }}
+                >
+                  <Text allowFontScaling={false} style={styles.taskGlyph}>
+                    {statusGlyph(taskStatus(task))}
+                  </Text>
+                  <Text allowFontScaling={false} numberOfLines={1} style={styles.taskTitle}>
+                    {taskRowLabel(task, true)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : (
           <ScrollView style={styles.details}>
             <Text allowFontScaling={false} style={styles.when}>{when}</Text>
             <Text allowFontScaling={false} style={styles.source}>
@@ -109,6 +147,7 @@ export function EventDetailsModal({
               </>
             )}
           </ScrollView>
+          )}
 
           {/* Short timed blocks and all-day rows cannot safely fit inline
               controls. Details is therefore the universal route to an event
@@ -147,7 +186,14 @@ export function EventDetailsModal({
                 )}
                 {onAddTask && (
                   <TouchableOpacity style={styles.secondary} onPress={() => onAddTask(event)}>
-                    <Text allowFontScaling={false} style={styles.secondaryText}>+ Add a task to it</Text>
+                    <Text allowFontScaling={false} style={styles.secondaryText}>+ New task for it</Text>
+                  </TouchableOpacity>
+                )}
+                {onLinkTask && (
+                  <TouchableOpacity style={styles.secondary} onPress={() => setPicking(value => !value)}>
+                    <Text allowFontScaling={false} style={styles.secondaryText}>
+                      {picking ? '← Back to details' : '🔗 Attach an existing task'}
+                    </Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -170,7 +216,7 @@ export function EventDetailsModal({
 
 const styles = StyleSheet.create({
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 18 },
-  content: { width: '68%', maxWidth: 720, maxHeight: '76%', backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', borderRadius: 8, padding: 14 },
+  content: { width: '68%', maxWidth: 720, maxHeight: '86%', backgroundColor: '#fff', borderWidth: 2, borderColor: '#000', borderRadius: 8, padding: 14 },
   header: { flexDirection: 'row', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: '#000', paddingBottom: 8 },
   title: { flex: 1, fontSize: 19, fontWeight: 'bold', color: '#000' },
   taskHeading: { fontSize: 13, fontWeight: 'bold', color: '#000000', marginTop: 10, marginBottom: 4 },
@@ -180,7 +226,7 @@ const styles = StyleSheet.create({
   taskTitle: { fontSize: 13, color: '#000000' },
   taskDone: { textDecorationLine: 'line-through', color: '#606060' },
   close: { fontSize: 20, fontWeight: 'bold', color: '#000', paddingLeft: 12 },
-  details: { maxHeight: 260 },
+  details: { flexShrink: 1 },
   when: { fontSize: 16, fontWeight: 'bold', color: '#000', marginTop: 12 },
   source: { fontSize: 13, color: '#303030', backgroundColor: '#eee', padding: 7, marginVertical: 9 },
   warning: { fontSize: 13, color: '#000', borderWidth: 2, borderColor: '#000', padding: 8, marginBottom: 9 },

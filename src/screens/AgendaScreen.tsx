@@ -101,7 +101,11 @@ import { MonthGridView } from './MonthGridView';
 import { TaskListView } from './TaskListView';
 import { ParaView } from './ParaView';
 import { ProjectDetailView } from './ProjectDetailView';
-import { moveActiveProject, projectProgress } from '../domain/taskListView';
+import {
+  moveActiveProject,
+  projectProgress,
+  sortDeliverables,
+} from '../domain/taskListView';
 import { fetchCalendarFeed, normaliseFeedUrl, refreshCalendarFeeds } from '../domain/feedService';
 import { autoFileProject, autoFileWords, feedProject } from '../domain/autoFile';
 import { eventNoteKey, eventNoteMapping } from '../domain/eventNoteMapping';
@@ -6378,6 +6382,24 @@ export function AgendaScreen({ onWorkspaceRestored = () => {}, workspaceNotice =
             linkedTasks={detailEvent
               ? tasksForEvent(noteIdentity(detailEvent), tasks, calendarStorage.getAllMemberships())
               : []}
+            linkableTasks={detailEvent
+              ? sortDeliverables(
+                  tasks.filter(task => {
+                    if (isDone(task)) return false;
+                    // Already on this item, so there is nothing to attach.
+                    return calendarStorage.getMembership(task.uid).forEventIdentity
+                      !== noteIdentity(detailEvent);
+                  }),
+                  false
+                )
+              : []}
+            onLinkTask={task => {
+              if (!detailEvent) return;
+              calendarStorage.setMembership(task.uid, { forEventIdentity: noteIdentity(detailEvent) });
+              setMembershipRevision(value => value + 1);
+              void calendarStorage.flush();
+              setStatusMsg(`Attached "${task.title}" to ${detailEvent.summary}.`);
+            }}
             onToggleTask={handleToggleTask}
             onEditTask={task => {
               setDetailEvent(null);
