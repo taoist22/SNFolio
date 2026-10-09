@@ -36,6 +36,9 @@ SNFolio works without an online account. Calendar connections and PARA organizat
 - **Daily and PARA Notes**: Open or create daily journals and create, browse, and open notes and other files connected to Projects, Areas, and Resources. Create named notes for events and tasks, optionally filing them beneath their assigned Project or Area folder, or link an existing note or PDF.
 - **Weekly Project Folders**: Give any Project (a course, a client engagement, a quarter of sprints) a start and due date, and SNFolio creates a folder per week, files each event or task note in the week it belongs to, and lists last, this and next week first. Files linked to the Project's tasks and events show **🔗** and what they are linked to.
 - **Auto-file from Calendars**: File Brightspace, Canvas, Moodle, Outlook, Google and CalDAV items under a Project automatically, by a course code or client name found in their title, location or categories, or by filing a whole calendar under one Project.
+- **Calendar Items as Tasks**: A deadline that arrives as a calendar item — *Assignments Due*, *Initial Discussion Post* — can become a task you tick off, carry tasks alongside it, or be linked to a task you already have. Nothing is written back to the calendar, so a subscribed feed or a shared CalDAV item is never altered, and putting it back restores it immediately. A Project can convert its deadlines by matching words, so a term's worth handles itself.
+- **All Tasks View**: **☑ Tasks** sits beside Calendar, Day and PARA — every task in one place, filtered by Open, Today, Upcoming, Done or All, and grouped by status, priority, due date, Area or Project.
+- **Notebook Templates**: A note template can be a `.note`, not only a background image. SNFolio copies the notebook, so a new note starts with the template's real strokes, layers, titles and typed text — which a background image cannot carry. Works for daily, meeting, class, task and per-Project notes.
 - **Undo**: Undo Mark Complete, Archive, Move to Areas, Delete, and file moves from the message that confirms them.
 - **Class and Meeting Markers**: Mark Projects as Class or Work, and events as Class or Meeting. The calendar shows **C** and **M** beside items, and **[N]** or **[PDF]** when a note or PDF is linked.
 - **Workspace Backup & Restore**: Save tasks, calendars, PARA organization, settings, and note links to a backup file, automatically once a day if you like, and restore them later without touching your notes.
@@ -170,9 +173,28 @@ The same steps work for a 16-week course or a 12-week client engagement:
    - Tap **📁 Create Week Folders**.
    - Under **Notes for recurring events**, keep **One notebook for the series**, or choose **One note per session** to get a dated note for each lecture or meeting in its week folder.
    - Under **Auto-file from calendars**, enter the course code or client name, and tap **Save**. If the message says 0 items were filed, file the whole calendar under the Project instead (see **Filing calendar items automatically** below).
+   - Under **Treat as deadlines**, enter the words that mark a calendar item as something to do rather than attend — `Due, Assignment` suits most courses — and tap **Save**. Those items become tasks and stop drawing on the calendar (see **Turning calendar items into tasks** below).
    - Tap **Close**.
 4. From now on, **Create Note** on the Project's events, and on its tasks, offers the right week folder first. Anything else you write goes in with **+ New Note** in the week's section.
 5. Once a week, open **Planner ▾ → Weekly Review** and check **This Week by Project**.
+
+#### Turning calendar items into tasks
+
+A course calendar announces deadlines as events: *Assignments Due — Module Six*, *Initial Discussion Post Due*. They are things to do, not things to attend, and they clutter a calendar that should show where you have to be.
+
+Open any calendar item and you have three choices:
+
+- **☑ Make it a task** — a task takes its place. The item stops drawing on the calendar and the task appears on that date, with its due date set and its Project and Area carried over.
+- **+ New task for it** — the item stays, and you name a step to hang off it: *read chapter 4*, *draft the reply*. The item's own title is offered as a placeholder if you just want that.
+- **🔗 Attach an existing task** — links a task you already have, chosen from a list of unfinished ones, soonest due first.
+
+Whichever you choose, **the calendar item itself is never changed.** A subscribed feed cannot be written to at all, and a CalDAV item belongs to that account, so SNFolio will not remove something your phone and laptop can still see. Converting hides it on this device only.
+
+An item's tasks are listed when you open it, with their status, priority and due date. Tap one to edit it, or its box to tick it off.
+
+To undo a conversion, open the task and tap **📅 Put the event back**. It returns at once, because it was never touched — and the Project rule below will not convert it again.
+
+To do it for a whole course, use **Treat as deadlines** in the Project's settings. Items filed under that Project whose titles contain any of those words become tasks as they sync, including ones already filed, not only new arrivals. Anything you put back by hand stays back.
 
 #### Inside a Project
 
@@ -180,7 +202,11 @@ On a wide screen (the Manta, or anything 1000 px or wider) a Project has two col
 
 - **📅 Upcoming** lists the Project's next five events in the coming 60 days (tap one to open it), with a count of any more.
 
+- **Actionable Deliverables** shows what is still to do, soonest due first, with each task's due date; overdue work is marked **⚠**. **Completed Deliverables** shows what is finished, most recently first, with the date you finished it. The card shows the first few and **Open all N ›** shows the rest.
+
 - **📁 Project Files** lists what is actually in the Project's folder: notes, PDFs, EPUBs, and other documents, with each subfolder (such as `Week 01`) as a section you tap to open or close. Each open section lists its files and has its own **+ New Note in …**. **+ New Note** creates a note in this folder, **Choose Folder** points the Project at a different folder, and **Refresh Files** reads the folder again.
+- Creating a note asks whether it is a **🎓 Class** or **🏢 Meeting** note, already set to match the Project's own category, so a note in a class uses the class template without being asked twice. Either can be chosen for one note.
+- Every file offers **Open**, **Move…**, **Rename…** and **Delete…**. A rename keeps the file's annotations with it and keeps SNFolio's links pointing at it. A delete asks on the row first, takes the annotations with it, and cannot be undone.
 - A file linked to one of the Project's events or tasks shows **🔗**, with a grey line underneath saying what it is linked to, for example *↳ Task: Read chapter 4* or *↳ Research Methods (Sep 23)*. A file linked to several items names the first and adds *+1 more*. A note created from Project Files is not linked to any event or task, so it has no 🔗 and does not appear on the calendar.
 - **🔗 Linked from elsewhere (N)**, below Project Files, lists linked files stored outside the Project's folder, for example a meeting note in `/Note/Meetings` or a PDF in `Document`. Tap it to open the list. It only appears while there are such files, and disappears once you have moved them all into the Project.
 
@@ -243,6 +269,7 @@ Opening an archived or completed item offers **Restore** (or **Reopen** for a co
 
 - Tap **Calendar ▾** and choose **Month View** or **Week View**.
 - Tap **Planner ▾** and choose **Day Planner** or **Weekly Review**.
+- Tap **📁 PARA** for Projects, Areas and Resources, or **☑ Tasks** for every task at once. In Tasks, **Show** chooses Open, Today, Upcoming, Done or All, and **Group by** arranges them by status, priority, due date, Area or Project. Open includes undated tasks, because those are the easiest to forget; Today includes anything overdue.
 - Use the previous and next controls to move by the current view's natural interval: month, week, or day. Tap **Today** to return to the current date.
 - Configure the starting weekday and five- or seven-day Week View under **⚙ → Connections & Settings → App & View → Calendar Week Layout**. The selected starting day is also used by Month View, date pickers, and Weekly Review.
 - Month View shows events and dated tasks, plus quick access to work that would otherwise be invisible on a date grid: today, upcoming, no-date, and past-due tasks.
@@ -302,7 +329,7 @@ By default, meeting notes are saved in:
 /storage/emulated/0/Note/Meetings/
 ```
 
-You can change the standard Meeting/Class folders and templates under **⚙ → Connections & Settings → Notes & Storage**. Event Types can use their own folder and template. **Default Event Note Location** decides which location Create Note selects initially; the confirmation sheet can override it for one note.
+You can change the standard Meeting/Class folders and templates under **⚙ → Connections & Settings → Notes & Storage**. A template can be a **`.png` background** drawn under the page, or a **`.note` copied whole** — browse for either. A notebook template keeps its strokes, layers, titles and typed text, which a background image cannot carry, so it is the way to start every note with a heading block or a form you have drawn once. Two things to know: a `.note` stores its own page size, so make it on the device you use, and a recurring notebook templates its first page and continues on the default ruling, because a `.note` cannot furnish an added page. Event Types can use their own folder and template. **Default Event Note Location** decides which location Create Note selects initially; the confirmation sheet can override it for one note.
 
 
 
