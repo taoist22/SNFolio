@@ -71,6 +71,10 @@ export function ParaFilesPanel({
   const [choosing, setChoosing] = React.useState<boolean>(false);
   const [noteName, setNoteName] = React.useState<string>('');
   const noteNameInputRef = React.useRef<HandwritingTextInputHandle>(null);
+  // Read at press time, not from state: HandwritingTextInput commits
+  // onChangeText on blur, so a name typed and then confirmed without the field
+  // losing focus never reaches React.
+  const renameInputRef = React.useRef<HandwritingTextInputHandle>(null);
   const [loadedFolder, setLoadedFolder] = React.useState<string>('');
   const [open, setOpen] = React.useState<Record<string, boolean>>({});
   const [sections, setSections] = React.useState<Record<string, SectionState>>({});
@@ -319,6 +323,7 @@ export function ParaFilesPanel({
           )}
           <View style={styles.newRow}>
             <HandwritingTextInput
+              ref={renameInputRef}
               style={styles.input}
               value={renameTo}
               onChangeText={setRenameTo}
@@ -327,7 +332,7 @@ export function ParaFilesPanel({
               autoCorrect={false}
             />
             <TouchableOpacity style={styles.button} onPress={async () => {
-              const next = renameTo.trim();
+              const next = (renameInputRef.current?.getValue() ?? renameTo).trim();
               if (!next) return;
               setMoveMessage('');
               try {

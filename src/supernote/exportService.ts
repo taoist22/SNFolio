@@ -312,7 +312,9 @@ export async function renameFileInPlace(path: string, newName: string): Promise<
   if (!safe) return { success: false, path, message: 'Enter a name.' };
 
   const destination = `${dir}/${safe}${extension}`;
-  if (destination === path) return { success: true, path, message: 'Name unchanged.' };
+  if (destination === path) {
+    return { success: false, path, message: `It is already called ${safe}${extension}.` };
+  }
 
   try {
     if (await FileUtils.exists(destination)) {
