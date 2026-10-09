@@ -292,8 +292,12 @@ export async function deleteFileWithCompanions(path: string): Promise<ExportResu
  * name differs. Nothing is overwritten.
  */
 export async function renameFileInPlace(path: string, newName: string): Promise<ExportResult> {
-  if (!(await ensureFileWritePermission())) {
-    return { success: false, path, message: 'File access was not allowed.' };
+  // renameToFile is the call moveFileToFolder makes, and that has always needed
+  // both: a rename retires the old path, which the host counts as a delete.
+  const canWrite = await ensureFileWritePermission();
+  const canDelete = canWrite ? await ensureFileDeletePermission() : false;
+  if (!canWrite || !canDelete) {
+    return { success: false, path, message: 'Renaming a file needs both File Write and File Delete permission.' };
   }
   if (!FileUtils.renameToFile || !FileUtils.exists) {
     return { success: false, message: 'Renaming is unavailable in this build.' };
